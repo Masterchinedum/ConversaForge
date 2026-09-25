@@ -7,7 +7,7 @@ import { setAtPath, validateScenarioForPublish, type ScenarioConfig, type Valida
 import { ApiError, api, download, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';
-import { Alert, Badge, Button, ButtonLink, Card, ErrorState, Loading, Tabs, clsx, useToast } from '@/components/ui';
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, ErrorState, Loading, Tabs, clsx, useToast } from '@/components/ui';
 import { EditorContext, focusField, type EditorCtx } from '@/components/scenarios/editor-context';
 import { AssistantPanel, PreviewTab, PublishModal, ValidationPanel, VersionsTab, YamlEditor } from '@/components/scenarios/panels';
 import {
@@ -190,6 +190,18 @@ export default function ScenarioEditorPage() {
   );
 
   if (!can('scenarios.edit')) return <ErrorState error={new Error('Only creators can edit scenarios.')} />;
+  if (error instanceof ApiError && error.status === 404)
+    return (
+      <EmptyState
+        title="Scenario not found"
+        description="It may have been deleted, or it belongs to another workspace."
+        action={
+          <Link className="text-brand-700 hover:underline" href={href('/scenarios')}>
+            Back to scenarios
+          </Link>
+        }
+      />
+    );
   if (error) return <ErrorState error={error} retry={() => mutate()} />;
   if (!detail || !ctx || !config) return <Loading />;
 

@@ -24,8 +24,13 @@ function highlight(text: string, q: string) {
   );
 }
 
+/** Agent bookkeeping tools (agenda progress) — hidden by default so the transcript stays readable. */
+const INTERNAL_TOOLS = new Set(['update_progress']);
+
 export function TranscriptTab({ d, focusSeq }: { d: SessionDetail; focusSeq: number | null }) {
   const [q, setQ] = useState('');
+  const [showInternal, setShowInternal] = useState(false);
+  const internalCount = d.toolEvents.filter((e) => INTERNAL_TOOLS.has(e.toolId)).length;
   const [flash, setFlash] = useState<number | null>(null);
   const listRef = useRef<HTMLOListElement>(null);
 
@@ -39,11 +44,12 @@ export function TranscriptTab({ d, focusSeq }: { d: SessionDetail; focusSeq: num
       last = it.at;
     }
     for (const ev of d.toolEvents) {
+      if (!showInternal && INTERNAL_TOOLS.has(ev.toolId)) continue;
       const at = start ? new Date(ev.createdAt).getTime() - start : Number.MAX_SAFE_INTEGER;
       out.push({ kind: 'tool', at, ev });
     }
     return out.sort((a, b) => a.at - b.at || (a.kind === 'turn' && b.kind === 'turn' ? a.turn.seq - b.turn.seq : a.kind === 'turn' ? -1 : 1));
-  }, [d]);
+  }, [d, showInternal]);
 
   useEffect(() => {
     if (focusSeq == null) return;
@@ -78,6 +84,12 @@ export function TranscriptTab({ d, focusSeq }: { d: SessionDetail; focusSeq: num
         </label>
         <Input id="transcript-search" type="search" className="max-w-sm" placeholder="Search transcript…" value={q} onChange={(e) => setQ(e.target.value)} />
         {q && <span className="text-xs text-slate-500" aria-live="polite">{visible.length} matching turn(s)</span>}
+        {internalCount > 0 && (
+          <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={showInternal} onChange={(e) => setShowInternal(e.target.checked)} />
+            Show agent progress events ({internalCount})
+          </label>
+        )}
       </div>
       <ol ref={listRef} className="space-y-2">
         {visible.map((it) =>

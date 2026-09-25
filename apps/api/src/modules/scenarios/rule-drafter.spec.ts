@@ -5,6 +5,13 @@ const apply = (c: ScenarioConfig, changes: Array<{ path: string; value: unknown 
   changes.reduce<ScenarioConfig>((acc, ch) => setAtPath(acc, ch.path, ch.value), c);
 
 describe('rule-based drafter (simulator)', () => {
+  it('does not repeat the duration in the generated description ("10-minute -minute")', () => {
+    const { changes } = ruleBasedDraft('a 10-minute sales discovery call with a skeptical CFO of a logistics company', defaultScenarioConfig(), []);
+    const desc = changes.find((c) => c.path === 'basics.publicDescription')!.value as string;
+    expect(desc).toMatch(/^Practice a 10-minute sales discovery call/);
+    expect(desc).not.toMatch(/minute -minute|-minute minute/);
+  });
+
   it('parses type, duration and persona from a brief', () => {
     expect(detectType('a 15-minute sales discovery call with a skeptical CFO')).toBe('sales_practice');
     expect(detectType('mock system design interview')).toBe('interview');

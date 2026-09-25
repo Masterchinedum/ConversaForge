@@ -325,7 +325,7 @@ function SessionsList() {
                     </Link>
                     {r.participant.name && r.participant.email && <span className="block text-xs text-slate-500">{r.participant.email}</span>}
                   </Td>
-                  <Td>
+                  <Td className="min-w-[10rem] whitespace-normal">
                     {r.scenario.name} <Badge className="ml-1">v{r.version.number}</Badge>
                   </Td>
                   <Td>{label(r.channel)}</Td>
@@ -337,7 +337,7 @@ function SessionsList() {
                     {r.insufficientEvidence === null ? (
                       <span className="text-slate-400">—</span>
                     ) : r.overallScore === null ? (
-                      <span className="text-xs text-amber-800" title="Not enough evidence in the transcript to compute an overall score">
+                      <span className="whitespace-normal text-xs text-amber-800" title="Not enough evidence in the transcript to compute an overall score">
                         Insufficient evidence
                       </span>
                     ) : (
@@ -351,7 +351,7 @@ function SessionsList() {
                       {r.humanReviewRequired && !r.reviewed && <Badge tone="purple">Needs review</Badge>}
                     </div>
                   </Td>
-                  <Td className="text-xs text-slate-500">{formatDate(r.createdAt)}</Td>
+                  <Td className="min-w-[7rem] whitespace-normal text-xs text-slate-500">{formatDate(r.createdAt)}</Td>
                 </tr>
               ))}
             </tbody>

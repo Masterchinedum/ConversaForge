@@ -87,7 +87,9 @@ export function computeProgress(
   const counted = ordered.some((i) => i.required) ? ordered.filter((i) => i.required) : ordered;
   const completedRequired = counted.filter((i) => statuses[i.id] === 'COMPLETED').length;
   const totalRequired = counted.length;
-  const percent = totalRequired === 0 ? 0 : Math.floor((completedRequired / totalRequired) * 100);
+  // Rounded (2 of 3 → 67%), but never 100% until every counted item is complete.
+  const percent =
+    totalRequired === 0 ? 0 : completedRequired >= totalRequired ? 100 : Math.min(99, Math.round((completedRequired / totalRequired) * 100));
 
   const locked: Record<string, boolean> = {};
   let blocked = false;

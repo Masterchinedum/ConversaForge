@@ -149,7 +149,7 @@ export function Checkbox({ label, checked, onChange, disabled, description }: { 
 // ── Layout ──
 export function Card({ className, children, title, actions }: { className?: string; children: ReactNode; title?: ReactNode; actions?: ReactNode }) {
   return (
-    <section className={clsx('rounded-lg border border-slate-200 bg-white shadow-sm', className)}>
+    <section className={clsx('min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm', className)}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           {title && <h2 className="text-sm font-semibold text-slate-900">{title}</h2>}
@@ -262,7 +262,9 @@ export function Alert({ tone = 'info', title, children }: { tone?: 'info' | 'war
 // ── Table ──
 export function Table({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={clsx('overflow-x-auto rounded-lg border border-slate-200 bg-white', className)}>
+    // `relative` keeps absolutely positioned children (e.g. sr-only header labels) inside the scroll box;
+    // otherwise they escape the overflow clip and widen the whole page on small screens.
+    <div className={clsx('relative overflow-x-auto rounded-lg border border-slate-200 bg-white', className)}>
       <table className="min-w-full divide-y divide-slate-200 text-sm">{children}</table>
     </div>
   );
@@ -271,7 +273,9 @@ export function Th({ children, className }: { children?: ReactNode; className?: 
   return <th scope="col" className={clsx('bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500', className)}>{children}</th>;
 }
 export function Td({ children, className, colSpan }: { children?: ReactNode; className?: string; colSpan?: number }) {
-  return <td colSpan={colSpan} className={clsx('whitespace-nowrap px-3 py-2 text-slate-700', className)}>{children}</td>;
+  // A caller's whitespace-* must win over the default (Tailwind orders whitespace-nowrap after whitespace-normal).
+  const ws = className && /(^|\s)whitespace-/.test(className) ? '' : 'whitespace-nowrap ';
+  return <td colSpan={colSpan} className={clsx(`${ws}px-3 py-2 text-slate-700`, className)}>{children}</td>;
 }
 
 // ── Tabs ──

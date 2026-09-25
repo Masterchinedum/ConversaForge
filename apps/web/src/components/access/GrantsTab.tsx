@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, EmptyState, ErrorState, Field, Input, Loading, Select, Table, Td, Th, useToast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
@@ -14,6 +14,12 @@ export function GrantsTab({ scenarioId }: { scenarioId: string }) {
   const toast = useToast();
   const path = wsPath(`/scenarios/${scenarioId}/grants`);
   const { data, error, mutate } = useSWR<{ data: GrantDto[] }>(path);
+  const { mutate: mutateKey } = useSWRConfig();
+  // Also refresh the access summary (tab counters) on the page.
+  const refresh = () => {
+    void mutate();
+    void mutateKey(wsPath(`/scenarios/${scenarioId}/access`));
+  };
   const [type, setType] = useState<'EMAIL' | 'USER' | 'WORKSPACE'>('EMAIL');
   const [who, setWho] = useState('');
   const [permission, setPermission] = useState<'RUN' | 'VIEW_RESULTS' | 'EDIT'>('RUN');
@@ -40,7 +46,7 @@ export function GrantsTab({ scenarioId }: { scenarioId: string }) {
       setWho('');
       setExpiresAt('');
       toast.success('Access granted');
-      mutate();
+      refresh();
     } catch (err) {
       setFormError(errorMessage(err));
     } finally {
@@ -135,7 +141,7 @@ export function GrantsTab({ scenarioId }: { scenarioId: string }) {
                       onConfirm={async () => {
                         try {
                           await api(`${path}/${g.id}`, { method: 'DELETE' });
-                          mutate();
+                          refresh();
                         } catch (e) {
                           toast.error(errorMessage(e));
                         }

@@ -104,7 +104,7 @@ export function topicQuestion(
   const example = wantsExample ? ', with a specific example' : '';
   // Bare noun phrases ("brief introduction and current role") read badly after "hear about".
   const hasDeterminer = /^(a|an|the|your|my|our|how|what|why|when|where|which|who|whether|any|some|one|two|three|\w+ing)\b/i.test(topic);
-  if (!hasDeterminer) return { lead, question: `Next, let's cover: ${topic}. Could you walk me through that${example}?` };
+  if (!hasDeterminer) return { lead, question: `${first ? 'First' : 'Next'}, let's cover: ${topic}. Could you walk me through that${example}?` };
   return { lead, question: `I'd like to hear about ${topic}. Could you tell me about that${example}?` };
 }
 

@@ -249,7 +249,7 @@ export class AccessService {
     const r = await loadRunnableScenario(this.prisma, t.workspaceId, t.scenarioId!, t.pinnedVersionId);
     if (!r.config.channels.embed.enabled) throw gone('scenario_unavailable', 'Embedding is disabled for this conversation.');
     return {
-      scenario: publicScenarioInfo(r),
+      scenario: publicScenarioInfo(r, (t.variables ?? {}) as Record<string, unknown>),
       allowedOrigins: t.allowedOrigins,
       expiresAt: t.expiresAt,
       participant: { name: t.participantName, hasEmail: !!t.participantEmail },
@@ -324,7 +324,7 @@ export class AccessService {
     const mode = r.config.access.identityMode;
     return {
       kind: 'invite' as const,
-      scenario: publicScenarioInfo(r),
+      scenario: publicScenarioInfo(r, (t.variables ?? {}) as Record<string, unknown>),
       access: {
         identityMode: mode,
         requiresName: identityNeedsName(mode) && !t.participantName,

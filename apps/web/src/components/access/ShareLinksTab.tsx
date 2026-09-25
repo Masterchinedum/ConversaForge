@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import {
   Alert,
   Badge,
@@ -60,6 +60,12 @@ export function ShareLinksTab({ scenarioId, summary }: { scenarioId: string; sum
   const toast = useToast();
   const path = wsPath(`/scenarios/${scenarioId}/links`);
   const { data, error, mutate } = useSWR<{ data: ShareLinkDto[] }>(path);
+  const { mutate: mutateKey } = useSWRConfig();
+  // Also refresh the access summary (tab counters) on the page.
+  const refresh = () => {
+    void mutate();
+    void mutateKey(wsPath(`/scenarios/${scenarioId}/access`));
+  };
   const [editing, setEditing] = useState<ShareLinkDto | 'new' | null>(null);
   const [showRevoked, setShowRevoked] = useState(false);
 
@@ -139,7 +145,7 @@ export function ShareLinksTab({ scenarioId, summary }: { scenarioId: string; sum
                           try {
                             await api(`${path}/${l.id}`, { method: 'DELETE' });
                             toast.success('Link revoked');
-                            mutate();
+                            refresh();
                           } catch (e) {
                             toast.error(errorMessage(e));
                           }
@@ -164,7 +170,7 @@ export function ShareLinksTab({ scenarioId, summary }: { scenarioId: string; sum
           onClose={() => setEditing(null)}
           onSaved={(l, created) => {
             setEditing(null);
-            mutate();
+            refresh();
             if (created) {
               navigator.clipboard?.writeText(l.url).catch(() => undefined);
               toast.success('Link created and copied to your clipboard');

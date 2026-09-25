@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { mutate } from 'swr';
 import { Alert, Badge, Button, ButtonLink, Loading } from '@/components/ui';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { useMe } from '@/lib/workspace';
@@ -40,6 +41,8 @@ export default function InvitePage() {
     setAcceptError(null);
     try {
       const r = await api<{ workspaceId: string }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST' });
+      // Refresh the cached membership list first, or the workspace page would not know the new workspace yet.
+      await mutate('/auth/me');
       router.replace(`/w/${r.workspaceId}`);
     } catch (e) {
       setAcceptError(errorMessage(e));

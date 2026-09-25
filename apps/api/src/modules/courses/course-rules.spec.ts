@@ -18,6 +18,18 @@ describe('computeProgress', () => {
     expect(p.complete).toBe(false);
   });
 
+  it('rounds the percentage (2 of 3 → 67%) but only reports 100% when complete', () => {
+    const two = [
+      { courseItemId: 'a', generation: 1, status: 'COMPLETED', startedAt: t(1) },
+      { courseItemId: 'b', generation: 1, status: 'COMPLETED', startedAt: t(2) },
+    ];
+    expect(computeProgress(items, two, 1, false).percent).toBe(67);
+    expect(computeProgress(items, two.slice(0, 1), 1, false).percent).toBe(33);
+    const many = Array.from({ length: 200 }, (_, i) => ({ id: `i${i}`, position: i, required: true }));
+    const done = many.slice(0, 199).map((it, i) => ({ courseItemId: it.id, generation: 1, status: 'COMPLETED', startedAt: t(i) }));
+    expect(computeProgress(many, done, 1, false).percent).toBe(99);
+  });
+
   it('counts only attempts of the current generation', () => {
     const attempts = [
       { courseItemId: 'a', generation: 1, status: 'COMPLETED', startedAt: t(1) },

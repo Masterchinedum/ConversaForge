@@ -83,15 +83,19 @@ export function LineChart({
   const hp = hover != null ? points[hover] : null;
 
   return (
-    <div ref={ref} className="relative w-full">
+    <div ref={ref} className="relative w-full min-w-0">
       {!values.length ? (
         <p className="flex items-center justify-center text-sm text-slate-500" style={{ height }}>
           {empty}
         </p>
       ) : (
         <svg
-          width={width}
+          // Fluid width (a fixed pixel width would stop the card from shrinking on small screens);
+          // the viewBox follows the measured width so the drawing is never distorted once measured.
+          width="100%"
           height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="none"
           role="img"
           aria-label={`${label}: line chart over ${points.length} days`}
           className="block text-brand-600"

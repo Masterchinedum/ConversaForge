@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import {
   Alert,
   Badge,
@@ -52,6 +52,12 @@ export function AccessTokensTab({ scenarioId, summary }: { scenarioId: string; s
   const toast = useToast();
   const path = wsPath('/access-tokens');
   const { data, error, mutate } = useSWR<{ data: AccessTokenDto[] }>(`${path}?scenarioId=${scenarioId}&limit=100`);
+  const { mutate: mutateKey } = useSWRConfig();
+  // Also refresh the access summary (tab counters) on the page.
+  const refresh = () => {
+    void mutate();
+    void mutateKey(wsPath(`/scenarios/${scenarioId}/access`));
+  };
   const [creating, setCreating] = useState(false);
   const [minted, setMinted] = useState<{ token: string; url: string | null; purpose: string; emailed: boolean } | null>(null);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -122,7 +128,7 @@ export function AccessTokensTab({ scenarioId, summary }: { scenarioId: string; s
                       onConfirm={async () => {
                         try {
                           await api(`${path}/${t.id}`, { method: 'DELETE' });
-                          mutate();
+                          refresh();
                         } catch (e) {
                           toast.error(errorMessage(e));
                         }
@@ -146,7 +152,7 @@ export function AccessTokensTab({ scenarioId, summary }: { scenarioId: string; s
           onCreated={(m) => {
             setCreating(false);
             setMinted(m);
-            mutate();
+            refresh();
           }}
         />
       )}

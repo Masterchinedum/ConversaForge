@@ -24,7 +24,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: '/scenarios', label: 'Scenarios', cap: 'scenarios.edit' },
       { href: '/gallery', label: 'Gallery & templates' },
-      { href: '/courses', label: 'Courses', cap: 'courses.edit' },
+      { href: '/courses', label: 'Courses', cap: 'sessions.review' }, // reviewers get a read-only view of learner progress
       { href: '/knowledge', label: 'Knowledge', cap: 'knowledge.manage' },
     ],
   },
@@ -57,9 +57,14 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const pathname = usePathname();
   const router = useRouter();
-  const { data: me, error } = useMe();
+  const { data: me, error, mutate: refreshMe } = useMe();
   const [menuOpen, setMenuOpen] = useState(false);
   const ctx = useMemo(() => (me ? makeWorkspaceCtx(me, workspaceId) : null), [me, workspaceId]);
+  // A workspace missing from a cached /auth/me may have just been joined or created: re-check once before "not found".
+  const [recheckedFor, setRecheckedFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (me && !ctx && recheckedFor !== workspaceId) void refreshMe().finally(() => setRecheckedFor(workspaceId));
+  }, [me, ctx, workspaceId, recheckedFor, refreshMe]);
 
   useEffect(() => {
     if (error) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
@@ -75,7 +80,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   }, [ctx]);
   useEffect(() => setMenuOpen(false), [pathname]);
 
-  if (!me) return <Loading />;
+  if (!me || (!ctx && recheckedFor !== workspaceId)) return <Loading />;
   if (!ctx)
     return (
       <main className="mx-auto max-w-lg px-4 py-16 text-center">

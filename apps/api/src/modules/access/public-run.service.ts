@@ -88,7 +88,7 @@ export class PublicRunService {
     const prefilled = (link.prefilledVariables ?? {}) as Record<string, unknown>;
     return {
       kind: 'link' as const,
-      scenario: publicScenarioInfo(r),
+      scenario: publicScenarioInfo(r, prefilled),
       access: {
         identityMode: link.identityMode,
         requiresName: identityNeedsName(link.identityMode),

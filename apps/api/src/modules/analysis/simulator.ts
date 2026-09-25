@@ -75,12 +75,36 @@ function signals(turns: TurnLike[]): Signals {
   let totalWords = 0;
   for (const t of turns) {
     numbers += (t.text.match(/\b\d+(?:[.,]\d+)?\s*(?:%|percent|k|m|x|years?|months?|weeks?|days?|hours?|people|customers|users)?\b/gi) ?? []).length;
-    firstPerson += (t.text.match(/\b(I|I'm|I've|I'd|my|we|our)\b/g) ?? []).length;
+    numbers += (t.text.match(/\b(half|double[sd]?|twice|zero|twenty|thirty|forty|fifty|hundred|thousand|million)\b/gi) ?? []).length;
+    firstPerson += (t.text.match(/\b(I|I'm|I've|I'd|my|we|our)\b/gi) ?? []).length;
     examples += (t.text.match(/\b(for example|for instance|such as|when I|one time|last (?:year|quarter|month)|as a result|which led|so that)\b/gi) ?? []).length;
     totalWords += words(t.text).length;
   }
   return { numbers, firstPerson, examples, avgWords: turns.length ? totalWords / turns.length : 0 };
 }
+
+/**
+ * Concepts the heuristic can recognise even when the rubric's words are not repeated verbatim
+ * (e.g. "Quantifies outcomes" ↔ an answer with numbers). A criterion mentions a concept through its
+ * text; a turn shows it through surface signals. Matched concepts count like shared keywords.
+ */
+const CONCEPTS: Array<{ name: string; criterion: RegExp; turn: (text: string) => boolean }> = [
+  {
+    name: 'metrics',
+    criterion: /\b(metric|quantif|measur|number|impact|outcome|result|data)/i,
+    turn: (t) => /\d/.test(t) || /\b(percent|half|double[sd]?|twice|zero|hundred|thousand|million)\b/i.test(t),
+  },
+  {
+    name: 'ownership',
+    criterion: /\b(ownership|owns?|personal|responsib|decision|initiative|accountab)/i,
+    turn: (t) => /\bI (led|owned|decided|built|wrote|split|designed|drove|took|made|proposed|set up|created|introduced|chose|ran|organi[sz]ed|paired)\b|\bmy (task|role|job|responsibility|decision)\b/i.test(t),
+  },
+  {
+    name: 'structure',
+    criterion: /\b(structur|STAR\b|situation)/i,
+    turn: (t) => words(t).length >= 20 && /\b(task|goal|situation|challenge|so that|as a result|result|because)\b/i.test(t),
+  },
+];
 
 export interface SimCriterion {
   criterionId: string;
@@ -105,9 +129,14 @@ export function simulateScoring(
 } {
   const subjectTurns = turns.filter((t) => (subject ? t.speaker === subject : t.speaker !== 'SYSTEM') && t.text.trim());
   const results: SimCriterion[] = criteria.map((c) => {
-    const stems = keywordStems(`${c.name} ${c.description} ${c.strongPerformance}`);
+    const criterionText = `${c.name} ${c.description} ${c.strongPerformance}`;
+    const stems = keywordStems(criterionText);
+    const concepts = CONCEPTS.filter((k) => k.criterion.test(criterionText));
     const matches = subjectTurns
-      .map((t) => ({ t, overlap: [...keywordStems(t.text)].filter((k) => stems.has(k)) }))
+      .map((t) => ({
+        t,
+        overlap: [...[...keywordStems(t.text)].filter((k) => stems.has(k)), ...concepts.filter((k) => k.turn(t.text)).map((k) => `~${k.name}`)],
+      }))
       .filter((m) => m.overlap.length > 0)
       .sort((a, b) => b.overlap.length - a.overlap.length || a.t.seq - b.t.seq);
     if (!matches.length) {
@@ -129,7 +158,7 @@ export function simulateScoring(
     else if (sig.avgWords > 30) score += 8;
     else score += Math.round((sig.avgWords - 8) / 5);
     score = Math.max(5, Math.min(95, Math.round(score)));
-    const matchedWords = [...new Set(top.flatMap((m) => m.overlap))].slice(0, 6);
+    const matchedWords = [...new Set(top.flatMap((m) => m.overlap))].slice(0, 6).map((w) => (w.startsWith('~') ? `${w.slice(1)} signal` : w));
     return {
       criterionId: c.id,
       score,

@@ -1,5 +1,5 @@
 import type { Scenario, ScenarioVersion } from '@prisma/client';
-import { ScenarioConfigSchema, resolveVariables, type IdentityMode, type ScenarioConfig } from '@cf/shared';
+import { ScenarioConfigSchema, resolveVariables, substituteVariables, type IdentityMode, type ScenarioConfig } from '@cf/shared';
 // Installs the time-bounded tester for runtime variable patterns (ReDoS guard).
 import '../../common/security/regex-guard';
 import { z } from 'zod';
@@ -48,14 +48,23 @@ export async function loadRunnableScenario(
 }
 
 /** Participant-safe description of a scenario (never includes AI instructions, rubric or internal notes). */
-export function publicScenarioInfo(r: RunnableScenario) {
+/**
+ * Participant-facing scenario info for landing pages. `{{placeholders}}` are filled with the values known
+ * before the session starts (variable defaults + values fixed by the link/token); the rest show the
+ * variable's label so participants never see template syntax.
+ */
+export function publicScenarioInfo(r: RunnableScenario, fixedVariables: Record<string, unknown> = {}) {
   const { scenario, version, config } = r;
+  const known = resolveVariables(config.variables.allowlist, fixedVariables).values;
+  const values: Record<string, string> = Object.fromEntries(config.variables.allowlist.map((v) => [v.key, `[${v.label || v.key}]`]));
+  Object.assign(values, known);
+  const fill = (text: string) => substituteVariables(text, values);
   return {
     id: scenario.id,
     name: config.basics.name || scenario.name,
     type: config.basics.type,
-    description: config.basics.publicDescription || scenario.publicDescription || '',
-    participantInstructions: config.basics.participantInstructions,
+    description: fill(config.basics.publicDescription || scenario.publicDescription || ''),
+    participantInstructions: fill(config.basics.participantInstructions),
     language: config.basics.language,
     durationMinutes: config.basics.targetDurationMinutes,
     maxDurationMinutes: config.conversation.ending.maxDurationMinutes,
