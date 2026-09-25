@@ -148,7 +148,7 @@ function Sketch({ onStrokes, canvasRef }: { onStrokes: (n: number) => void; canv
       <canvas
         ref={canvasRef}
         className="block w-full touch-none rounded-md border border-slate-300 bg-white"
-        aria-label="Sketch area: draw with your mouse, finger or pen. Describe your sketch in the text box below."
+        aria-label="Sketch area: draw with your mouse, finger or pen (use the text box below to explain it)"
         role="img"
         onPointerDown={(e) => {
           const ctx = e.currentTarget.getContext('2d');
