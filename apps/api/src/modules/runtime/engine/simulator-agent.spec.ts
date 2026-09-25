@@ -58,7 +58,7 @@ describe('simulator agent', () => {
     state = r.state;
 
     r = step(state, turns, 'Can you repeat that?');
-    expect(r.out.text).toMatch(/^Of course\. Could you walk me through your experience with scaling/);
+    expect(r.out.text).toMatch(/^Of course\. I'd like to hear about scaling a system under load\. Could you tell me about that\?$/);
     state = r.state;
 
     r = step(
@@ -100,6 +100,7 @@ describe('simulator agent', () => {
 
   it('extracts salient keywords', () => {
     expect(keywords('I led the Kubernetes migration at Acme Corp', 2)).toEqual(['Kubernetes', 'Acme Corp']);
-    expect(keywords('we refactored the billing pipeline', 1)).toEqual(['refactored']);
+    expect(keywords('we refactored the billing pipeline', 1)).toEqual(['billing pipeline']);
+    expect(keywords('We disagreed on a design once.', 1)).toEqual(['design']);
   });
 });

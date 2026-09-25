@@ -95,4 +95,5 @@ test('tool panels: notepad, upload, whiteboard (real) + cards, multiple choice, 
   await expect(doc2.getByText('Please choose a PDF, plain-text or Markdown file.')).toBeVisible();
   await doc2.getByLabel('Choose a file').setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.alloc(11 * 1024 * 1024, 97) });
   await expect(doc2.getByText(/too large/)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('tools.png'), fullPage: true });
 });

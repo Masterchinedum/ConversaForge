@@ -45,17 +45,32 @@ export function keywords(text: string, max = 2): string[] {
     }
     if (out.length >= max) return out;
   }
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9+#\s'-]/g, ' ')
+  // Then runs of up to three content words (skipping verb/adverb-looking words), longest first.
+  const tokens = text
+    .replace(/[^A-Za-z0-9+#\s'-]/g, ' ')
     .split(/\s+/)
-    .map((w) => w.replace(/^'+|'+$/g, ''))
-    .filter((w) => w.length >= 5 && !STOPWORDS.has(w) && !STOPWORDS.has(w.replace(/'/g, '')));
-  // Longest distinct words first; ties keep order of appearance.
-  const ranked = [...new Set(words)].sort((a, b) => b.length - a.length);
+    .map((w) => w.replace(/^'+|'+$/g, ''));
+  const isContent = (w: string) => {
+    const l = w.toLowerCase();
+    return l.length >= 3 && !STOPWORDS.has(l) && !STOPWORDS.has(l.replace(/'/g, '')) && !/(ed|ly)$/.test(l) && !/^\d+$/.test(l);
+  };
+  const phrases: string[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    // A trailing "-ing" word is usually a verb ("working", "shipping"); keep it only inside a phrase.
+    while (run.length && /ing$/i.test(run[run.length - 1]!)) run.pop();
+    if (run.length) phrases.push(run.slice(-3).join(' ').toLowerCase());
+    run = [];
+  };
+  for (const tok of tokens) {
+    if (tok && isContent(tok)) run.push(tok);
+    else flush();
+  }
+  flush();
+  const ranked = [...new Set(phrases)].filter((p) => p.length >= 5).sort((a, b) => b.length - a.length);
   for (const w of ranked) {
     if (out.length >= max) break;
-    if (!out.some((o) => o.toLowerCase().includes(w))) out.push(w);
+    if (!out.some((o) => o.toLowerCase().includes(w) || w.includes(o.toLowerCase()))) out.push(w);
   }
   return out;
 }
@@ -71,10 +86,17 @@ export function topicQuestion(
   variables: Record<string, string>,
   first: boolean,
 ): { lead: string; question: string } {
-  const topic = lowerFirst(item.topic.trim().replace(/[.?!]+$/, ''));
   const lead = first ? "Let's start." : 'Moving on.';
   if (item.fixedQuestion) return { lead, question: substituteVariables(item.fixedQuestion, variables).trim() };
-  return { lead, question: `Could you walk me through your experience with ${topic}, ideally with a specific example?` };
+  // Agenda topics are written about the participant in the third person ("a time they…"); speak to them.
+  const topic = lowerFirst(item.topic.trim().replace(/[.?!]+$/, ''))
+    .replace(/\bthemselves\b/gi, 'yourself')
+    .replace(/\btheir\b/gi, 'your')
+    .replace(/\bthey\b/gi, 'you')
+    .replace(/\bthem\b/gi, 'you')
+    .replace(/\bthe (candidate|participant|learner)'s\b/gi, 'your');
+  const wantsExample = /\b(time|example|situation|experience|accomplishment|project|challenge|decision|mistake|conflict|disagreement)\b/i.test(topic);
+  return { lead, question: `I'd like to hear about ${topic}. Could you tell me about that${wantsExample ? ', with a specific example' : ''}?` };
 }
 
 const SENTENCE_STARTERS = new Set(['during', 'after', 'before', 'while', 'since', 'last', 'this', 'when', 'then', 'at', 'in', 'on', 'our', 'we', 'so', 'also', 'once', 'recently', 'initially']);

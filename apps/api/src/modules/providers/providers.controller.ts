@@ -104,7 +104,9 @@ const TestSchema = z.object({ args: z.record(z.unknown()).default({}) });
 export class CustomFunctionsController {
   constructor(private readonly functions: CustomFunctionsService) {}
 
+  /** Readable by scenario editors (CREATOR+) so they can grant functions; header values stay masked. */
   @Get()
+  @RequireCapability('scenarios.edit')
   list(@Param('workspaceId') workspaceId: string) {
     return this.functions.list(workspaceId);
   }
@@ -119,6 +121,7 @@ export class CustomFunctionsController {
   }
 
   @Get(':functionId')
+  @RequireCapability('scenarios.edit')
   get(@Param('workspaceId') workspaceId: string, @Param('functionId') id: string) {
     return this.functions.get(workspaceId, id);
   }

@@ -95,3 +95,14 @@ export async function agentTurns(page: Page) {
 export async function savedTexts(page: Page) {
   return page.locator('[data-testid="transcript"] li[data-status="saved"]').allInnerTexts();
 }
+
+/** Mint a `cfe_` embed token (workstream E) as the host's backend would (here: creator cookie auth). */
+export async function mintEmbedToken(allowedOrigins: string[], participant: Record<string, string> = {}): Promise<string> {
+  const a = await apiClient();
+  const { workspaceId, scenarioId } = await scenarioContext();
+  const res = await a.post(`/api/workspaces/${workspaceId}/access-tokens`, {
+    data: { scenarioId, purpose: 'EMBED', allowedOrigins, participant, expiresInSeconds: 3600 },
+  });
+  if (!res.ok()) throw new Error(`mint failed: ${res.status()} ${await res.text()}`);
+  return (await res.json()).token;
+}
