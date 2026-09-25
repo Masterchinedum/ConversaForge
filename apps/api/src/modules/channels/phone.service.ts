@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { Prisma, type Session } from '@prisma/client';
 import { isTerminal, type ScenarioConfig, type SessionState } from '@cf/shared';
 import type { Redis } from 'ioredis';
@@ -71,7 +70,7 @@ export class PhoneService {
     private readonly usage: UsageService,
     private readonly audit: AuditService,
     private readonly rateLimit: RateLimitService,
-    private readonly moduleRef: ModuleRef,
+    private readonly runtimeService: RuntimeService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
@@ -80,7 +79,7 @@ export class PhoneService {
   }
 
   private runtime(): RuntimeService {
-    return this.moduleRef.get(RuntimeService, { strict: false });
+    return this.runtimeService;
   }
 
   apiBase() {

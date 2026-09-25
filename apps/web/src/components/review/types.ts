@@ -82,6 +82,8 @@ export interface SessionDetail {
     metadata: Record<string, unknown>;
     errorCode: string | null;
     errorMessage: string | null;
+    /** Set when the retention policy redacted transcript text and removed media. */
+    contentRedactedAt?: string | null;
     analysisStatus: ProcessingStatus;
     analysisError: string | null;
     analysisGeneration: number;

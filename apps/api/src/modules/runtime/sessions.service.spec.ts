@@ -107,6 +107,12 @@ d('SessionsService (integration, test DB)', () => {
     const e1 = await svc.createSession({ ...base, participant: { email: 'pat@example.com' } });
     const e2 = await svc.createSession({ ...base, participant: { email: 'PAT@example.com', name: 'Pat' } });
     expect(e2.session.participantId).toBe(e1.session.participantId);
+    // Security: an unverified email typed on a link must never attach to an account-linked
+    // participant (their memory/history), nor to a server-verified externalId participant.
+    const typed = await svc.createSession({ ...base, participant: { email: user.email, name: 'Impostor' } });
+    expect(typed.session.participantId).not.toBe(u1.session.participantId);
+    const typed2 = await svc.createSession({ ...base, participant: { email: 'x@example.com' } });
+    expect(typed2.session.participantId).not.toBe(a.session.participantId);
     const anon1 = await svc.createSession({ ...base, participant: {} });
     const anon2 = await svc.createSession({ ...base, participant: {} });
     expect(anon1.session.participantId).not.toBe(anon2.session.participantId);

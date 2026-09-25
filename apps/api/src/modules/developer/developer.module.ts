@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
+import { AdminModule } from '../admin/admin.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { CoursesModule } from '../courses/courses.module';
 import { RuntimeModule } from '../runtime/runtime.module';
@@ -21,7 +22,7 @@ import { V1AccessTokensController, V1WebhooksController } from './v1/v1-tokens-w
  * workstreams' services; v1 controllers only adapt them.
  */
 @Module({
-  imports: [ScenariosModule, RuntimeModule, AnalysisModule, CoursesModule, AccessModule, WebhooksModule],
+  imports: [ScenariosModule, RuntimeModule, AnalysisModule, CoursesModule, AccessModule, AdminModule, WebhooksModule],
   controllers: [
     ApiKeysController,
     V1ScenariosController,

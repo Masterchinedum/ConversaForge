@@ -1,5 +1,4 @@
 import { Logger } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { OnGatewayConnection, WebSocketGateway } from '@nestjs/websockets';
 import type { IncomingMessage } from 'node:http';
 import type { RawData, WebSocket } from 'ws';
@@ -26,7 +25,8 @@ export class TwilioMediaGateway implements OnGatewayConnection {
   private readonly logger = new Logger('TwilioMedia');
 
   constructor(
-    private readonly moduleRef: ModuleRef,
+    private readonly runtimeService: RuntimeService,
+    private readonly speech: SpeechService,
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
     private readonly phone: PhoneService,
@@ -105,8 +105,8 @@ export class TwilioMediaGateway implements OnGatewayConnection {
     const callSid = typeof msg?.start?.callSid === 'string' ? msg.start.callSid : '';
     if (!sessionId || !token || !streamSid) return null;
 
-    const runtime = this.moduleRef.get(RuntimeService, { strict: false });
-    const speechSvc = this.moduleRef.get(SpeechService, { strict: false });
+    const runtime = this.runtimeService;
+    const speechSvc = this.speech;
     const session = await this.prisma.session.findFirst({ where: { id: sessionId, deletedAt: null } });
     if (!session || !['PHONE_INBOUND', 'PHONE_OUTBOUND'].includes(session.channel)) return null;
     if (session.externalRef && callSid && session.externalRef !== callSid) {

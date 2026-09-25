@@ -872,7 +872,13 @@ export class SessionEngine {
       if (this.config.memory.enabled && this.config.memory.maxFactsInPrompt > 0) {
         try {
           const mem = this.deps.optional.memory();
-          if (mem) {
+          // Memory is only used for verified identities (signed-in user, or an externalId minted
+          // server-side via an embed/participant token). Unverified typed emails get no memory.
+          const who = await this.deps.prisma.participant.findFirst({
+            where: { id: this.session.participantId, workspaceId: this.session.workspaceId },
+            select: { userId: true, externalId: true },
+          });
+          if (mem && (who?.userId || who?.externalId)) {
             this.memoryFacts = (
               await mem.factsForSession(this.session.workspaceId, this.session.participantId, this.session.scenarioId, this.config.memory.maxFactsInPrompt)
             ).map((f) => ({ category: f.category ?? null, content: String(f.content ?? '') }));

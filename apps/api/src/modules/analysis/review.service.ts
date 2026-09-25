@@ -257,6 +257,7 @@ export class ReviewService {
         endedAt: session.endedAt,
         durationMs: session.durationMs,
         retentionUntil: session.retentionUntil,
+        contentRedactedAt: session.contentRedactedAt,
         enrollmentId: session.enrollmentId,
         shareLinkId: session.shareLinkId,
       },

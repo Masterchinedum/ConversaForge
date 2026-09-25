@@ -66,6 +66,12 @@ export function TranscriptTab({ d, focusSeq }: { d: SessionDetail; focusSeq: num
 
   return (
     <div>
+      {d.session.contentRedactedAt && (
+        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+          Transcript text and recordings were removed on {new Date(d.session.contentRedactedAt).toLocaleDateString()} under the
+          retention policy. Scores and metadata are kept.
+        </p>
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <label htmlFor="transcript-search" className="sr-only">
           Search transcript

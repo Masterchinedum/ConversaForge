@@ -1,5 +1,4 @@
 import { Body, Get, Param, Post, Query, Req } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import { ApiOperation } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
 import { ROLES, USAGE_KINDS } from '@cf/shared';
@@ -67,7 +66,7 @@ function period(q: { from?: Date; to?: Date }, defaultDays?: number) {
 export class V1OrgController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly moduleRef: ModuleRef,
+    private readonly membersService: MembersService,
     private readonly courses: CoursesService,
     private readonly audit: AuditService,
   ) {}
@@ -113,8 +112,7 @@ export class V1OrgController {
   @ApiOperation({ summary: 'Invite someone by email (API keys can invite up to ADMIN)' })
   async invite(@CurrentWorkspace() ws: WorkspaceContext, @Req() req: FastifyRequest, @Body(new ZodPipe(V1InviteBody)) body: z.infer<typeof V1InviteBody>) {
     // MembersService (workstream E) owns invitation rules (personal workspaces, owner-only owner invites, one open invite per email).
-    const members = this.moduleRef.get(MembersService, { strict: false });
-    return members.invite(ws.workspaceId, body, apiKeyOf(req), ws);
+    return this.membersService.invite(ws.workspaceId, body, apiKeyOf(req), ws);
   }
 
   // ───────────── courses ─────────────

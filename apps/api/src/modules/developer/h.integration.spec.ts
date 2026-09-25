@@ -9,7 +9,12 @@
 import { createHmac } from 'node:crypto';
 
 const DB = process.env.H_TEST_DATABASE_URL;
-if (DB) process.env.DATABASE_URL = DB;
+if (DB) {
+  process.env.DATABASE_URL = DB;
+  // A public https API URL so meeting bots are not BLOCKED for reachability; Svix secret for Recall webhooks.
+  process.env.API_PUBLIC_URL = 'https://api.h-test.example';
+  process.env.RECALL_WEBHOOK_SECRET = `whsec_${Buffer.from('recall-h-test-secret-0123456789').toString('base64')}`;
+}
 const d = DB ? describe : describe.skip;
 
 type Inject = (opts: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; json: () => any; headers: Record<string, any>; body: string }>;
@@ -462,5 +467,127 @@ d('Developer platform, webhooks & channels (integration)', () => {
 
     // Members without channels.manage cannot use channel admin routes.
     expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/channels/availability`, headers: auth(otherToken) })).statusCode).toBe(404);
+  });
+  it('meeting bots (Recall.ai, faked HTTP): create → realtime transcript → Svix status → COMPLETED session', async () => {
+    const { MeetingsService } = await import('../channels/meetings.service');
+    const meetings = app.get(MeetingsService);
+    await prisma.providerConnection.create({
+      data: { workspaceId: wsA, provider: 'recall', kind: 'MEETING', encryptedSecret: crypto.encrypt('recall_test_key'), config: { region: 'eu-central-1' } },
+    });
+    const calls: Array<{ url: string; init: any }> = [];
+    meetings.fetchImpl = (async (url: string, init: any) => {
+      calls.push({ url, init });
+      if (init.method === 'POST') return new Response(JSON.stringify({ id: 'bot_abc123' }), { status: 201 });
+      return new Response(JSON.stringify({ id: 'bot_abc123', status_changes: [{ code: 'joining_call' }, { code: 'in_call_recording' }] }), { status: 200 });
+    }) as any;
+    const r = await inject({
+      method: 'POST',
+      url: `/api/workspaces/${wsA}/channels/meeting-bots`,
+      headers: { ...json, ...auth(userToken) },
+      payload: { scenarioId, meetingUrl: 'https://us02web.zoom.us/j/1234567890', evaluatedSpeakerName: 'Dana' },
+    });
+    expect(r.statusCode).toBe(201);
+    const bot = r.json();
+    expect(bot).toMatchObject({ status: 'JOINING', providerBotId: 'bot_abc123', platform: 'zoom' });
+    const req = calls[0]!;
+    expect(req.url).toBe('https://eu-central-1.recall.ai/api/v1/bot/');
+    expect(req.init.headers.Authorization).toBe('Token recall_test_key');
+    const sent = JSON.parse(req.init.body);
+    expect(sent).toMatchObject({ meeting_url: 'https://us02web.zoom.us/j/1234567890', recording_config: { transcript: { provider: { recallai_streaming: expect.any(Object) } } } });
+    const endpoint = new URL(sent.recording_config.realtime_endpoints[0].url);
+    expect(sent.recording_config.realtime_endpoints[0].events).toEqual(['transcript.data']);
+    expect(endpoint.origin + endpoint.pathname).toBe('https://api.h-test.example/api/channels/recall/webhook');
+    const session = await prisma.session.findUnique({ where: { id: bot.sessionId } });
+    expect(session).toMatchObject({ channel: 'MEETING', externalRef: 'bot_abc123', state: 'READY' });
+
+    const utter = (speaker: string, text: string, t: number) => ({
+      event: 'transcript.data',
+      data: {
+        data: { words: [{ text, start_timestamp: { relative: t }, end_timestamp: { relative: t + 2 } }], participant: { id: speaker === 'Dana' ? 1 : 2, name: speaker } },
+        bot: { id: 'bot_abc123', metadata: {} },
+      },
+    });
+    const url = `/api/channels/recall/webhook${endpoint.search}`;
+    expect((await inject({ method: 'POST', url, headers: json, payload: utter('Dana', 'Thanks for joining, what is your budget?', 1) })).statusCode).toBe(200);
+    expect((await inject({ method: 'POST', url, headers: json, payload: utter('Lee', 'Around fifty thousand.', 4) })).statusCode).toBe(200);
+    expect((await inject({ method: 'POST', url, headers: json, payload: utter('Lee', 'Around fifty thousand.', 4) })).statusCode).toBe(200); // duplicate
+    const turns = await prisma.transcriptTurn.findMany({ where: { sessionId: bot.sessionId }, orderBy: { seq: 'asc' } });
+    expect(turns.map((t: any) => [t.seq, t.speaker, t.text])).toEqual([
+      [1, 'PARTICIPANT', 'Thanks for joining, what is your budget?'],
+      [2, 'AGENT', 'Around fifty thousand.'],
+    ]);
+    expect((await prisma.session.findUnique({ where: { id: bot.sessionId } })).state).toBe('ACTIVE');
+
+    // Status webhook signed with the Svix scheme (workspace verification secret).
+    const body = JSON.stringify({ event: 'bot.done', data: { data: { code: 'done' }, bot: { id: 'bot_abc123', metadata: { conversaforge_bot_id: bot.id } } } });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const key = Buffer.from(process.env.RECALL_WEBHOOK_SECRET!.slice(6), 'base64');
+    const sig = createHmac('sha256', key).update(`msg_1.${ts}.${body}`).digest('base64');
+    const unsigned = await inject({ method: 'POST', url: '/api/channels/recall/webhook', headers: json, payload: body });
+    expect(unsigned.statusCode).toBe(401);
+    const done = await inject({ method: 'POST', url: '/api/channels/recall/webhook', headers: { ...json, 'webhook-id': 'msg_1', 'webhook-timestamp': ts, 'webhook-signature': `v1,${sig}` }, payload: body });
+    expect(done.statusCode).toBe(200);
+    const finished = await prisma.session.findUnique({ where: { id: bot.sessionId } });
+    expect(finished.state).toBe('COMPLETED');
+    expect(finished.endedAt).toBeTruthy();
+    expect((await prisma.meetingBot.findUnique({ where: { id: bot.id } })).status).toBe('COMPLETED');
+    // Late utterances after completion are ignored.
+    await inject({ method: 'POST', url, headers: json, payload: utter('Dana', 'late', 99) });
+    expect(await prisma.transcriptTurn.count({ where: { sessionId: bot.sessionId } })).toBe(2);
+  });
+  it('batch scheduler dials with the concurrency limit and completes from call outcomes', async () => {
+    const { BatchesService } = await import('../channels/batches.service');
+    const batches = app.get(BatchesService);
+    // Speech providers present (fake keys; nothing is called in this test) → phone channel "ready".
+    for (const provider of ['deepgram', 'elevenlabs']) {
+      await prisma.providerConnection.create({ data: { workspaceId: wsA, provider, kind: provider === 'deepgram' ? 'STT' : 'TTS', encryptedSecret: crypto.encrypt(`fake-${provider}`) } });
+    }
+    const b = (await inject({ method: 'POST', url: `/api/workspaces/${wsA}/channels/batches`, headers: { ...json, ...auth(userToken) }, payload: { name: 'Batch', scenarioId, concurrency: 2 } })).json();
+    expect(b.status).toBe('DRAFT');
+    const up = await inject({
+      method: 'POST',
+      url: `/api/workspaces/${wsA}/channels/batches/${b.id}/targets`,
+      headers: { ...json, ...auth(userToken) },
+      payload: { csv: 'phone,name,role_title\n+14155550201,A,Eng\n+14155550202,B,PM\n+14155550203,C,\nnot-a-phone,D,' },
+    });
+    expect(up.json()).toMatchObject({ added: 3, errorCount: 1 });
+    enqueued.length = 0;
+    const started = await inject({ method: 'POST', url: `/api/workspaces/${wsA}/channels/batches/${b.id}/start`, headers: { ...json, ...auth(userToken) }, payload: {} });
+    expect(started.json()).toMatchObject({ status: 'RUNNING' });
+    expect(enqueued.some((j) => j.name === 'batch_tick' && j.data.batchId === b.id)).toBe(true);
+
+    const dialed: any[] = [];
+    let n = 0;
+    const dial = async (_ws: string, input: any, ctx: any) => {
+      dialed.push({ input, ctx });
+      const s = await prisma.session.create({
+        data: {
+          workspaceId: wsA,
+          scenarioId,
+          scenarioVersionId: (await prisma.scenario.findUnique({ where: { id: scenarioId } })).latestVersionId,
+          participantId: (await prisma.participant.create({ data: { workspaceId: wsA, externalId: `batch-${uniq}-${n}` } })).id,
+          channel: 'PHONE_OUTBOUND',
+          metadata: { twilio: { batchId: ctx.batchId, targetId: ctx.targetId } },
+        },
+      });
+      return { sessionId: s.id, callSid: `CAbatch${n++}`, status: 'queued' };
+    };
+    expect(await batches.tick(b.id, dial)).toMatchObject({ dialed: 2, status: 'RUNNING' });
+    expect(dialed.map((d) => d.input.to)).toEqual(['+14155550201', '+14155550202']);
+    expect(dialed[0].input.variables).toEqual({ role_title: 'Eng' });
+    // Concurrency respected: nothing more while two are in flight.
+    expect((await batches.tick(b.id, dial)).dialed).toBe(0);
+    const t1 = await prisma.outboundCallTarget.findFirst({ where: { batchId: b.id, phone: '+14155550201' } });
+    const s1 = await prisma.session.findUnique({ where: { id: t1.sessionId } });
+    await batches.onCallOutcome({ sessionId: s1.id, callSid: 'CAbatch0', callStatus: 'no-answer', durationSec: null, connected: false }, s1);
+    expect((await prisma.outboundCallTarget.findUnique({ where: { id: t1.id } })).status).toBe('NO_ANSWER');
+    expect((await batches.tick(b.id, dial)).dialed).toBe(1);
+    for (const t of await prisma.outboundCallTarget.findMany({ where: { batchId: b.id, status: 'DIALING' } })) {
+      const s = await prisma.session.findUnique({ where: { id: t.sessionId } });
+      await batches.onCallOutcome({ sessionId: s.id, callSid: t.callSid, callStatus: 'completed', durationSec: 42, connected: true }, s);
+    }
+    expect(await batches.tick(b.id, dial)).toMatchObject({ status: 'COMPLETED' });
+    const final = (await inject({ method: 'GET', url: `/api/workspaces/${wsA}/channels/batches/${b.id}`, headers: auth(userToken) })).json();
+    expect(final).toMatchObject({ status: 'COMPLETED', progress: { total: 3, COMPLETED: 2, NO_ANSWER: 1 } });
   });
 });

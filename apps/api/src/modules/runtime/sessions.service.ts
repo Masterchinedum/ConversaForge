@@ -242,8 +242,14 @@ export class SessionsService {
       if (byUser) return update(byUser);
     }
     if (email) {
+      // An email typed on a public/share link is NOT verified. Anonymous runs may only reuse other
+      // anonymous (unclaimed, no externalId) participants with that email — never an account-linked
+      // participant, whose coach memory and history must not be exposed to whoever types their email.
+      // Kept in sync with courses/participants.ts (participantForUser).
       const byEmail = await this.prisma.participant.findFirst({
-        where: { workspaceId, email, ...(userId ? { OR: [{ userId: null }, { userId }] } : {}) },
+        where: userId
+          ? { workspaceId, email, userId: null }
+          : { workspaceId, email, userId: null, externalId: null },
         orderBy: { createdAt: 'asc' },
       });
       if (byEmail) return update(byEmail);
