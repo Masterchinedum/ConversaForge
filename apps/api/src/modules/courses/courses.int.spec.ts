@@ -372,11 +372,26 @@ describe('visibility, enrollment & editor validation', () => {
     const email = `later-${rand()}@example.com`;
     const r = await enrollments.assign(ws.id, course.id, creatorP, { userIds: [], teamIds: [], emails: [email.toUpperCase()], notify: false });
     expect(r.created).toBe(1);
-    const later = await prisma.user.create({ data: { email, name: 'Later' } });
+    const later = await prisma.user.create({ data: { email, name: 'Later', emailVerifiedAt: new Date() } });
     await prisma.membership.create({ data: { workspaceId: ws.id, userId: later.id, role: 'MEMBER' } });
     const ov = await learn.overview(ws.id, asLearner(later), 'MEMBER');
     expect(ov.enrollments.map((e) => e.course.id)).toContain(course.id);
     expect(ov.enrollments.find((e) => e.course.id === course.id)!.progress.percent).toBe(0);
+  });
+
+  it('SECURITY: an account with an UNVERIFIED email cannot claim an email assignment for that address', async () => {
+    const { course } = await newCourse();
+    const email = `squat-${rand()}@example.com`;
+    // Squatter signs up (unverified) BEFORE the assignment is made …
+    const squatter = await prisma.user.create({ data: { email, name: 'Squatter' } });
+    await prisma.membership.create({ data: { workspaceId: ws.id, userId: squatter.id, role: 'MEMBER' } });
+    await enrollments.assign(ws.id, course.id, creatorP, { userIds: [], teamIds: [], emails: [email], notify: false });
+    const p = await prisma.participant.findFirstOrThrow({ where: { workspaceId: ws.id, email } });
+    expect(p.userId).toBeNull(); // not bound to the unverified account
+    // … and the learner ref of an unverified principal carries no email (see learn.controller `learner`).
+    const ov = await learn.overview(ws.id, { userId: squatter.id, email: null, name: 'Squatter' }, 'MEMBER');
+    expect(ov.enrollments.map((e) => e.course.id)).not.toContain(course.id);
+    expect((await prisma.participant.findUniqueOrThrow({ where: { id: p.id } })).userId).toBeNull();
   });
 
   it('team assignment expands to team participants', async () => {

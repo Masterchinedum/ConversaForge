@@ -5,7 +5,7 @@ import { Public } from '../../common/auth/decorators';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { Errors } from '../../common/http/errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { StorageService } from '../../common/storage/storage.service';
+import { contentDispositionHeader, safeServeType, StorageService } from '../../common/storage/storage.service';
 
 /**
  * Serves local-driver media through HMAC-signed, expiring URLs issued by StorageService.signedUrl()
@@ -30,11 +30,17 @@ export class MediaController {
     if (!asset) throw Errors.notFound('Media');
     const buf = await this.storage.get(asset.storageKey);
     const total = buf.length;
-    reply.header('Content-Type', asset.mimeType);
+    // Never echo the stored type blindly: only passive media/document types render inline; anything
+    // else downloads as octet-stream, so an uploaded HTML/SVG file cannot run script on our origin.
+    const serve = safeServeType(asset.mimeType);
+    reply.header('Content-Type', serve.contentType);
     reply.header('Cache-Control', 'private, max-age=300');
     reply.header('Accept-Ranges', 'bytes');
     reply.header('X-Content-Type-Options', 'nosniff');
-    if (asset.fileName) reply.header('Content-Disposition', `inline; filename="${asset.fileName.replace(/[^\w.\- ]/g, '_')}"`);
+    reply.header('Referrer-Policy', 'no-referrer');
+    // Sandbox everything except PDFs (browsers' built-in PDF viewers refuse to run in a sandbox).
+    if (serve.contentType !== 'application/pdf') reply.header('Content-Security-Policy', "default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+    reply.header('Content-Disposition', contentDispositionHeader(serve.disposition, asset.fileName));
     const range = req.headers.range;
     if (range) {
       const m = /bytes=(\d*)-(\d*)/.exec(range);

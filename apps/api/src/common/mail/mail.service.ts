@@ -17,7 +17,10 @@ export class MailService {
 
   async send(msg: { to: string; subject: string; text: string; html?: string }) {
     if (!this.transporter) {
-      this.logger.log(`[dev mail] to=${msg.to} subject="${msg.subject}"\n${msg.text}`);
+      // Bodies carry bearer links (password reset, verification, invitations, personal run links): only
+      // log them outside production, where logs are shipped and retained.
+      if (env.NODE_ENV === 'production') this.logger.warn(`SMTP_URL is not configured; email to=${msg.to} subject="${msg.subject}" was NOT sent`);
+      else this.logger.log(`[dev mail] to=${msg.to} subject="${msg.subject}"\n${msg.text}`);
       return { delivered: false, logged: true };
     }
     await this.transporter.sendMail({ from: env.MAIL_FROM, ...msg });

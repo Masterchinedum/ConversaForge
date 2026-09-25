@@ -4,7 +4,7 @@ import useSWR from 'swr';
 import { can, type Capability, type Role } from '@cf/shared';
 
 export interface MeResponse {
-  user: { id: string; email: string; name: string | null; isSuperAdmin: boolean };
+  user: { id: string; email: string; name: string | null; isSuperAdmin: boolean; emailVerifiedAt?: string | null };
   workspaces: Array<{ id: string; name: string; slug: string; kind: 'PERSONAL' | 'ORGANIZATION'; role: Role }>;
 }
 

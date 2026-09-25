@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { Alert, Button, Field, Input } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
+import { safeReturnUrl } from '@/lib/live/token';
 
 function LoginForm() {
   const router = useRouter();
@@ -22,7 +23,7 @@ function LoginForm() {
         setError(null);
         try {
           await api('/auth/login', { method: 'POST', body: { email, password } });
-          router.replace(next && next.startsWith('/') && !next.startsWith('//') ? next : '/app');
+          router.replace(safeReturnUrl(next) ?? '/app');
         } catch (err) {
           setError(errorMessage(err));
           setLoading(false);

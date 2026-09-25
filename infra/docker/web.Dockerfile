@@ -19,7 +19,9 @@ COPY packages/shared packages/shared
 COPY apps/web apps/web
 # Public (browser) URLs are baked in at build time.
 ARG NEXT_PUBLIC_API_WS_URL
-ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL NEXT_OUTPUT=standalone
+# Next.js resolves rewrite destinations at build time: where the web server proxies /api/*.
+ARG API_INTERNAL_URL=http://api:4000
+ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL API_INTERNAL_URL=$API_INTERNAL_URL NEXT_OUTPUT=standalone
 RUN pnpm --filter @cf/shared build && pnpm --filter @cf/web build
 
 FROM base AS runtime

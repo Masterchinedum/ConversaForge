@@ -10,7 +10,8 @@ Requirements: a Linux host with Docker, a DNS record `APP_DOMAIN` pointing at it
 git clone <repo> conversaforge && cd conversaforge
 # Build images (or pull from your registry in CI)
 docker build -f infra/docker/api.Dockerfile -t conversaforge/api:1.0.0 .
-docker build -f infra/docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_WS_URL=wss://app.example.com -t conversaforge/web:1.0.0 .
+docker build -f infra/docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_WS_URL=wss://app.example.com \
+  --build-arg API_INTERNAL_URL=http://api:4000 -t conversaforge/web:1.0.0 .   # both are baked in at build time
 
 cd infra
 cp ../.env.example .env.production     # then edit — see "Required settings" below

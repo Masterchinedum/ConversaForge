@@ -19,7 +19,7 @@ export interface StorageDriver {
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
   /** A URL the browser can fetch directly (S3 presigned) or null to use the API's signed proxy route. */
-  presignGet?(key: string, ttlSeconds: number, fileName?: string): Promise<string>;
+  presignGet?(key: string, ttlSeconds: number, fileName?: string, mimeType?: string): Promise<string>;
 }
 
 class LocalDriver implements StorageDriver {
@@ -92,17 +92,56 @@ class S3Driver implements StorageDriver {
       return false;
     }
   }
-  async presignGet(key: string, ttlSeconds: number, fileName?: string) {
+  async presignGet(key: string, ttlSeconds: number, fileName?: string, mimeType?: string) {
+    const serve = safeServeType(mimeType);
     return getSignedUrl(
       this.client,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        ResponseContentDisposition: fileName ? `inline; filename="${fileName.replace(/"/g, '')}"` : undefined,
+        ResponseContentType: serve.contentType,
+        ResponseContentDisposition: contentDispositionHeader(serve.disposition, fileName),
       }),
       { expiresIn: ttlSeconds },
     );
   }
+}
+
+/** Types a browser may render inline from our origin without executing script. */
+const INLINE_SAFE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'audio/webm',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/wav',
+  'video/webm',
+  'video/mp4',
+  'video/quicktime',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+]);
+
+/**
+ * How to serve a stored object: inline only for passive media/document types; anything else (HTML, SVG,
+ * XML, JS, unknown…) is forced to a download as application/octet-stream so an uploaded file can never
+ * run script on our origin (stored XSS). Text types are pinned to UTF-8 plain text.
+ */
+export function safeServeType(mimeType: string | null | undefined): { contentType: string; disposition: 'inline' | 'attachment' } {
+  const base = String(mimeType ?? '').split(';')[0]!.trim().toLowerCase();
+  if (!INLINE_SAFE_TYPES.has(base)) return { contentType: 'application/octet-stream', disposition: 'attachment' };
+  if (base.startsWith('text/')) return { contentType: 'text/plain; charset=utf-8', disposition: 'inline' };
+  return { contentType: base, disposition: 'inline' };
+}
+
+export function contentDispositionHeader(kind: 'inline' | 'attachment', fileName?: string | null): string {
+  const ascii = String(fileName ?? '').replace(/[^\w.\- ]/g, '_').slice(0, 150);
+  return ascii ? `${kind}; filename="${ascii}"` : kind;
 }
 
 @Injectable()
@@ -147,9 +186,9 @@ export class StorageService {
    * Signed URL for a media asset. Callers MUST have authorized access to the asset first.
    * S3: presigned object URL. Local: API route /api/media/signed/<token> verified by HMAC.
    */
-  async signedUrl(asset: { id: string; storageKey: string; workspaceId: string; fileName?: string | null }, ttlSeconds = 900) {
+  async signedUrl(asset: { id: string; storageKey: string; workspaceId: string; fileName?: string | null; mimeType?: string | null }, ttlSeconds = 900) {
     this.assertWorkspaceKey(asset.workspaceId, asset.storageKey);
-    if (this.driver.presignGet) return this.driver.presignGet(asset.storageKey, ttlSeconds, asset.fileName ?? undefined);
+    if (this.driver.presignGet) return this.driver.presignGet(asset.storageKey, ttlSeconds, asset.fileName ?? undefined, asset.mimeType ?? undefined);
     const token = this.crypto.signPayload({ a: asset.id, k: asset.storageKey, w: asset.workspaceId }, ttlSeconds);
     return `${env.API_PUBLIC_URL}/api/media/signed/${token}`;
   }

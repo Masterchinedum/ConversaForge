@@ -155,6 +155,164 @@ const GOOD_ANSWERS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 1. Creator
+// ─────────────────────────────────────────────────────────────────────────────
+const shared: Record<string, string> = {};
+
+test.describe('1. creator', () => {
+  test('sign up → org → scenarios (template, guided + assistant) → versions → duplicate → YAML → try it', async ({ browser }) => {
+    test.setTimeout(420_000);
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const problems = watch(page);
+    const email = `qa-creator-${RUN}@test.local`;
+    shared.creatorEmail = email;
+
+    // Sign up (UI) → personal workspace
+    await page.goto('/signup');
+    await page.getByLabel('Name').fill('Quinn Creator');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password').fill('qa-password-123');
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await page.waitForURL(/\/w\/[a-z0-9]+$/);
+    await expect(page.locator('main#main')).toBeVisible();
+    await shot(page, '1-01-personal-dashboard');
+    const me = await (await page.request.get('/api/auth/me')).json();
+    expect(me.workspaces).toHaveLength(1);
+    expect(me.workspaces[0].kind).toBe('PERSONAL');
+    writeFileSync(join(CACHE, `qa-${email.replace(/[^a-z0-9]/gi, '_')}.json`), JSON.stringify(await ctx.storageState()));
+
+    // Create an organization via the workspace switcher
+    await page.locator('#ws-switch').selectOption('__new');
+    await page.waitForURL(/\/w\/new$/);
+    await page.getByLabel(/Organization name/).fill(`QA Org ${RUN}`);
+    await page.getByRole('button', { name: 'Create workspace' }).click();
+    await page.waitForURL(/\/w\/(?!new$)[a-z0-9]+$/);
+    const ws = page.url().split('/').pop()!;
+    shared.orgId = ws;
+    await expect(page.locator('#ws-switch')).toHaveValue(ws);
+    await shot(page, '1-02-org-dashboard');
+
+    // From template
+    await page.goto(`/w/${ws}/scenarios`);
+    await shot(page, '1-03-scenarios-empty');
+    await page.getByTestId('new-scenario').click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByRole('tab', { name: 'From template' }).click();
+    await dlg.getByRole('radio', { name: /Behavioral interview \(STAR\)/ }).click();
+    await dlg.getByRole('button', { name: 'Create' }).click();
+    await page.waitForURL(/\/scenarios\/[a-z0-9]+$/);
+    await expect(page.getByTestId('scenario-title')).toHaveText(/Behavioral interview/);
+    shared.templateScenarioId = page.url().split('/').pop()!;
+    await expect(page.getByText('Ready to publish.')).toBeVisible();
+    await shot(page, '1-04-template-editor');
+    await page.getByTestId('publish').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText('Published version 1')).toBeVisible();
+
+    // From scratch: guided mode + drafting assistant
+    await page.goto(`/w/${ws}/scenarios`);
+    await page.getByTestId('new-scenario').click();
+    await page.getByRole('dialog').getByLabel('Name').fill('QA sales discovery');
+    await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+    await page.waitForURL(/\/scenarios\/[a-z0-9]+$/);
+    const sid = page.url().split('/').pop()!;
+    shared.scratchScenarioId = sid;
+    await expect(page.getByRole('button', { name: /1\. Basics/ })).toHaveAttribute('aria-current', 'step');
+    await shot(page, '1-05-guided-empty');
+    await page.getByLabel('What should change?').fill('a 10-minute sales discovery call with a skeptical CFO of a logistics company about our analytics product');
+    await page.getByRole('button', { name: 'Propose changes' }).click();
+    const proposal = page.getByTestId('assistant-proposal');
+    await expect(proposal).toBeVisible();
+    await shot(page, '1-06-assistant-proposal');
+    await proposal.getByRole('button', { name: /Apply selected/ }).click();
+    await expect(page.getByText('All changes applied')).toBeVisible();
+    await expect(page.getByTestId('scenario-title')).toHaveText('QA sales discovery');
+    for (const step of ['AI persona & goals', 'Conversation', 'Ending & timing', 'Feedback', 'Data to extract', 'Review & publish']) {
+      await page.getByRole('button', { name: `Next: ${step}` }).click();
+      await shot(page, `1-07-guided-${step.replace(/\W+/g, '-')}`);
+    }
+    // Break the weights on the Feedback step → publish is blocked → normalize
+    await page.getByRole('button', { name: /5\. Feedback/ }).click();
+    await page.getByLabel('Criterion 1 weight').fill('90');
+    await expect(page.getByText(/weights must sum to 100/).first()).toBeVisible();
+    await expect(page.getByTestId('save-state')).toHaveText('All changes saved', { timeout: 10_000 });
+    await page.getByTestId('publish').click();
+    await shot(page, '1-08-publish-blocked');
+    await expect(page.getByRole('dialog').getByRole('button', { name: 'Publish' })).toBeDisabled();
+    await page.getByRole('dialog').getByRole('button', { name: /Cancel|Close/ }).first().click();
+    await page.getByRole('button', { name: 'Normalize to 100' }).click();
+    await expect(page.getByText('Ready to publish.').first()).toBeVisible();
+    await expect(page.getByTestId('save-state')).toHaveText('All changes saved', { timeout: 10_000 });
+    await page.getByRole('button', { name: 'Validate' }).click();
+    await expect(page.getByText(/Valid — /)).toBeVisible();
+    await page.getByTestId('publish').click();
+    await page.getByLabel('Change note').fill('First version');
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText('Published version 1')).toBeVisible();
+
+    // Edit & publish v2
+    await page.getByRole('tab', { name: 'Advanced' }).click();
+    await page.locator('#field-persona-name input').fill('Dana QA');
+    await expect(page.getByTestId('save-state')).toHaveText('All changes saved', { timeout: 10_000 });
+    await page.getByTestId('publish').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText('Published version 2')).toBeVisible();
+
+    // History, diff, rollback → v3
+    await page.getByRole('tab', { name: /Versions/ }).click();
+    await page.getByTestId('version-1').getByRole('button', { name: 'Diff vs latest' }).click();
+    await expect(page.getByTestId('diff')).toContainText('persona.name');
+    await shot(page, '1-09-versions-diff');
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('version-1').getByRole('button', { name: 'Rollback to this version' }).click();
+    await expect(page.getByText('Rolled back — published version 3')).toBeVisible();
+    await expect(page.getByTestId('version-3')).toContainText('Latest');
+
+    // Preview
+    await page.getByRole('button', { name: 'Preview' }).click();
+    await expect(page.getByText('What participants see')).toBeVisible();
+    await shot(page, '1-10-preview');
+
+    // YAML export → import as a new scenario
+    const dl = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export YAML' }).click();
+    const file = await (await dl).path();
+    const yamlText = readFileSync(file!, 'utf8');
+    expect(yamlText).toContain('QA sales discovery');
+    await page.goto(`/w/${ws}/scenarios`);
+    await page.getByTestId('new-scenario').click();
+    await page.getByRole('dialog').getByRole('tab', { name: 'Import YAML/JSON' }).click();
+    await page.getByRole('dialog').getByLabel('Paste YAML or JSON').fill(yamlText);
+    await page.getByRole('dialog').getByLabel('Name (optional)').fill('QA imported');
+    await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+    await page.waitForURL(/\/scenarios\/[a-z0-9]+$/);
+    await expect(page.getByTestId('scenario-title')).toHaveText('QA imported');
+
+    // Duplicate the original
+    await page.goto(`/w/${ws}/scenarios/${sid}`);
+    await page.getByRole('button', { name: 'Duplicate' }).click();
+    await expect(page.getByText('Duplicated')).toBeVisible();
+    await page.waitForURL((u) => !u.pathname.endsWith(sid));
+    await expect(page.getByTestId('scenario-title')).toContainText('QA sales discovery');
+    await page.goto(`/w/${ws}/scenarios`);
+    await shot(page, '1-11-library');
+
+    // Try it as the creator
+    await page.goto(`/w/${ws}/scenarios/${sid}`);
+    await page.getByRole('button', { name: /Try it/ }).click();
+    await page.waitForURL(/\/live\//);
+    await shot(page, '1-12-live-intro');
+    await joinTyped(page, { record: false });
+    await shot(page, '1-13-live-call');
+    await converse(page, GOOD_ANSWERS.slice(0, 3), { endIfOpen: true });
+    await shot(page, '1-14-live-end');
+    await ctx.close();
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 8. Cross-cutting: every sidebar page for every role
 // ─────────────────────────────────────────────────────────────────────────────
 const PAGES: Array<{ path: string; minRole: Role }> = [

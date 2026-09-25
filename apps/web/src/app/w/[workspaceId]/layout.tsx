@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { Capability } from '@cf/shared';
+import { VerifyEmailBanner } from '@/components/account/VerifyEmailBanner';
 import { Loading } from '@/components/ui';
 import { api } from '@/lib/api';
 import { makeWorkspaceCtx, useMe, WorkspaceContext } from '@/lib/workspace';
@@ -183,6 +184,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           </div>
         </aside>
         <main id="main" className="min-w-0 flex-1 px-4 py-6 lg:px-8">
+          {me.user.emailVerifiedAt === null && <VerifyEmailBanner email={me.user.email} />}
           {children}
         </main>
       </div>
