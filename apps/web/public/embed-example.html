@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ConversaForge embed example</title>
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+      main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      p { color: #475569; font-size: 14px; }
+      form { display: grid; gap: 8px; grid-template-columns: 1fr; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+      label { font-size: 13px; font-weight: 600; }
+      input { font: inherit; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; box-sizing: border-box; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 0; background: #4f46e5; color: #fff; cursor: pointer; }
+      button.secondary { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; }
+      button:focus-visible, input:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
+      #call { margin-top: 16px; }
+      pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; font-size: 12px; max-height: 220px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Embed example</h1>
+      <p>
+        Your server mints a short-lived <code>cfe_</code> embed token with an API key
+        (<code>POST /api/v1/access-tokens</code>) and passes it to this page. Never put API keys in a web page.
+        The page's origin must be in the token's allowed origins.
+      </p>
+      <form id="f">
+        <div>
+          <label for="token">Embed token (cfe_…) — or leave empty and use a share-link token</label>
+          <input id="token" autocomplete="off" placeholder="cfe_…" />
+        </div>
+        <div>
+          <label for="link">Share-link token (alternative)</label>
+          <input id="link" autocomplete="off" placeholder="token from /r/&lt;token&gt;" />
+        </div>
+        <div class="row">
+          <button type="submit">Start conversation</button>
+          <button type="button" class="secondary" id="end">End</button>
+          <button type="button" class="secondary" id="destroy">Remove</button>
+        </div>
+      </form>
+      <div id="call"></div>
+      <h2 style="font-size:14px">Events</h2>
+      <pre id="log" aria-live="polite"></pre>
+    </main>
+    <script src="/embed.js"></script>
+    <script>
+      (function () {
+        var call = null;
+        var log = document.getElementById('log');
+        function write(e) {
+          log.textContent += new Date().toLocaleTimeString() + '  ' + JSON.stringify(e) + '\n';
+          log.scrollTop = log.scrollHeight;
+        }
+        document.getElementById('f').addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          if (call) call.destroy();
+          var token = document.getElementById('token').value.trim();
+          var link = document.getElementById('link').value.trim();
+          try {
+            call = ConversaForge.init({
+              container: '#call',
+              baseUrl: location.origin,
+              token: token || undefined,
+              linkToken: token ? undefined : link || undefined,
+              participant: { name: 'Demo participant', externalId: 'demo-123' },
+              height: 680,
+              autoHeight: true,
+              onEvent: write,
+            });
+          } catch (e) {
+            write({ type: 'init_error', message: String(e && e.message) });
+          }
+        });
+        document.getElementById('end').addEventListener('click', function () { if (call) call.end(); });
+        document.getElementById('destroy').addEventListener('click', function () { if (call) { call.destroy(); call = null; } });
+      })();
+    </script>
+  </body>
+</html>

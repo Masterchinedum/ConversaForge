@@ -20,6 +20,9 @@ async function bootstrap() {
   const adapter = new FastifyAdapter({
     trustProxy: true,
     bodyLimit: 12 * 1024 * 1024,
+    // Signed media/download tokens travel as a path param (/api/media/signed/<token>); Fastify's default
+    // maxParamLength (100) would reject them with 414.
+    maxParamLength: 2048,
     genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => (req.headers['x-request-id'] as string) || randomUUID(),
     logger: false,
   });

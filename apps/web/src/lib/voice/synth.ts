@@ -109,7 +109,7 @@ export class SynthSpeaker extends Emitter<SynthEvents> {
     return this.speaking?.turnId === turnId || this.queue.some((c) => c.turnId === turnId);
   }
 
-  private pump() {
+  private pump(): void {
     if (this.speaking || this.paused || this.disposed) return;
     const next = this.queue.shift();
     if (!next) {

@@ -11,6 +11,11 @@ export const QUEUES = {
   notifications: 'notifications',
   channels: 'channels',
   maintenance: 'maintenance',
+  /**
+   * E: org-admin maintenance (usage alert checks, retention, privacy data requests). Separate from
+   * `maintenance` so each queue has exactly one consumer handler (BullMQ hands a job to any worker).
+   */
+  adminMaintenance: 'admin-maintenance',
   /** F: course item attempt completion after session.terminal / session.analyzed. */
   courses: 'course-progress',
   /** F: coach memory learning after session.analyzed / session.terminal. */

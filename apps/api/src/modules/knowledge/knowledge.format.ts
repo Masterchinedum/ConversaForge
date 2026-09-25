@@ -28,7 +28,7 @@ export function citationLabel(r: Pick<KnowledgeSearchResult, 'documentTitle' | '
 /** Defuse delimiter spoofing: excerpts must not be able to close our wrapper tags. */
 function neutralize(s: string): string {
   return s
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁯﻿]/g, '')
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g, '')
     .replace(/<\/?\s*(knowledge_excerpt|knowledge_results|system|instructions?)[^>]*>/gi, '[removed tag]');
 }
 

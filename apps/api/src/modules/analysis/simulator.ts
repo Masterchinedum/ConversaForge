@@ -187,30 +187,54 @@ function parseNumber(s: string): number | null {
   return n;
 }
 
+/** The number closest (in words) to a variable keyword, preferring sentences that mention the keyword. */
+function numberNearKeyword(text: string, stems: Set<string>): number | null {
+  const ranked = sentences(text)
+    .map((s) => ({ s, hits: [...keywordStems(s)].filter((k) => stems.has(k)).length }))
+    .filter((x) => /\d/.test(x.s))
+    .sort((a, b) => b.hits - a.hits);
+  for (const { s, hits } of ranked) {
+    const toks = s.split(/\s+/);
+    const kwPos = toks.map((w, i) => (stems.has(stem(w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''))) ? i : -1)).filter((i) => i >= 0);
+    let best: { n: number; d: number } | null = null;
+    toks.forEach((w, i) => {
+      if (!/\d/.test(w) || /\d{4}-\d{2}-\d{2}/.test(w) || /^\d{1,2}:\d{2}/.test(w)) return;
+      const n = parseNumber(toks.slice(i, i + 2).join(' '));
+      if (n === null) return;
+      const d = kwPos.length ? Math.min(...kwPos.map((k) => Math.abs(k - i))) : 99;
+      if (!best || d < best.d) best = { n, d };
+    });
+    if (best && hits > 0) return (best as { n: number }).n;
+  }
+  return null;
+}
+
 export function simulateExtraction(
   vars: ExtractionVariable[],
   turns: TurnLike[],
 ): { values: Record<string, { value: unknown; evidenceTurnSeqs: number[]; confidence: number }> } {
-  const participant = turns.filter((t) => t.speaker === 'PARTICIPANT');
+  const spoken = turns.filter((t) => t.speaker !== 'SYSTEM' && t.text.trim());
+  const participant = spoken.filter((t) => t.speaker === 'PARTICIPANT');
   const values: Record<string, { value: unknown; evidenceTurnSeqs: number[]; confidence: number }> = {};
   const none = { value: null, evidenceTurnSeqs: [], confidence: 0 };
+  const participantFirst = (a: TurnLike, b: TurnLike) => (a.speaker === 'PARTICIPANT' ? 0 : 1) - (b.speaker === 'PARTICIPANT' ? 0 : 1) || a.seq - b.seq;
 
   for (const v of vars) {
     const stems = varStems(v);
-    const related = participant.filter((t) => [...keywordStems(t.text)].some((k) => stems.has(k)));
-    // Participant answers directly following an agent question that mentions the variable.
-    const answers = turns
-      .map((t, i) => ({ t, prev: turns[i - 1] }))
-      .filter(({ t, prev }) => t.speaker === 'PARTICIPANT' && prev?.speaker === 'AGENT' && [...keywordStems(prev.text)].some((k) => stems.has(k)))
-      .map(({ t }) => t);
-    const candidates = [...answers, ...related.filter((t) => !answers.includes(t))];
+    const mentions = (t: TurnLike) => [...keywordStems(t.text)].some((k) => stems.has(k));
+    // Answers: a turn directly following a question (from the other speaker) that mentions the variable.
+    const answers = spoken.filter((t, i) => {
+      const prev = spoken[i - 1];
+      return !!prev && prev.speaker !== t.speaker && prev.text.includes('?') && mentions(prev);
+    });
+    const related = spoken.filter(mentions).sort(participantFirst);
+    const candidates = [...answers.sort(participantFirst), ...related.filter((t) => !answers.includes(t))];
 
     let found: { value: unknown; seq: number } | null = null;
     switch (v.type) {
       case 'number':
         for (const t of candidates) {
-          const s = sentences(t.text).find((x) => /\d/.test(x)) ?? '';
-          const n = parseNumber(s);
+          const n = numberNearKeyword(t.text, stems);
           if (n !== null) {
             found = { value: n, seq: t.seq };
             break;
@@ -234,22 +258,22 @@ export function simulateExtraction(
           }
         }
         break;
-      case 'list':
+      case 'list': {
+        let best: { items: string[]; seq: number; score: number } | null = null;
         for (const t of candidates) {
-          const s = sentences(t.text).find((x) => x.includes(',')) ?? '';
-          if (s) {
+          for (const s of sentences(t.text).filter((x) => x.includes(','))) {
             const tail = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
             const items = tail
               .split(/,|\band\b/)
               .map((x) => x.replace(/[.!?]$/, '').trim())
-              .filter((x) => x && x.split(/\s+/).length <= 6);
-            if (items.length >= 2) {
-              found = { value: items, seq: t.seq };
-              break;
-            }
+              .filter((x) => x && x.split(/\s+/).length <= 6 && !/^(yes|no|yeah|ok|okay)$/i.test(x));
+            const score = items.length + (s.includes(':') ? 2 : 0) + (t.speaker === 'PARTICIPANT' ? 0.5 : 0);
+            if (items.length >= 2 && (!best || score > best.score)) best = { items, seq: t.seq, score };
           }
         }
+        if (best) found = { value: best.items, seq: best.seq };
         break;
+      }
       case 'text':
         if (v.enumValues?.length) {
           outer: for (const t of [...candidates, ...participant]) {

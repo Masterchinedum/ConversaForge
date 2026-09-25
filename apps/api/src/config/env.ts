@@ -70,6 +70,14 @@ const EnvSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   RECALL_API_KEY: z.string().optional(),
   RECALL_REGION: z.string().default('us-east-1'),
+  /** Recall.ai workspace verification secret (whsec_…) used to verify its webhooks (Svix scheme). */
+  RECALL_WEBHOOK_SECRET: z.string().optional(),
+
+  // ── Developer platform (workstream H) ──
+  /** Requests per minute allowed per API key on /api/v1. */
+  API_KEY_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(600),
+  /** Consecutive failed webhook deliveries (retries exhausted) before a subscription is auto-disabled. */
+  WEBHOOK_DISABLE_AFTER_FAILURES: z.coerce.number().int().min(1).default(5),
 
   // ── Email ──
   SMTP_URL: z.string().optional(),

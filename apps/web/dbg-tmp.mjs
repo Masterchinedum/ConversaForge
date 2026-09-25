@@ -1,0 +1,16 @@
+import { chromium } from '@playwright/test';
+const [sid, tok] = process.argv.slice(2);
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'] });
+const ctx = await b.newContext({ permissions: ['microphone'] });
+const p = await ctx.newPage();
+p.on('console', m => console.log('console', m.type(), m.text().slice(0,300)));
+p.on('websocket', ws => { console.log('ws', ws.url()); ws.on('framesent', f => console.log('>', String(f.payload).slice(0,200))); ws.on('framereceived', f => console.log('<', String(f.payload).slice(0,200))); ws.on('close', () => console.log('ws closed')); });
+await p.goto(`http://localhost:3103/live/${sid}#t=${tok}`);
+await p.getByRole('button', { name: 'Continue' }).click();
+await p.getByLabel(/I understand/).check();
+await p.getByRole('button', { name: 'Agree and continue' }).click();
+await p.getByRole('button', { name: /Allow microphone/ }).click();
+await p.getByRole('button', { name: 'Join the call' }).click();
+await p.waitForTimeout(8000);
+console.log(await p.getByTestId('call-status').innerText());
+await b.close();

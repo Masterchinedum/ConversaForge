@@ -20,6 +20,10 @@ export interface TurnDTO {
   endedAtMs: number | null;
   interrupted: boolean;
   source: string | null;
+  /** (B, additive) True when the text was produced by the local development simulator. */
+  simulated?: boolean;
+  /** (B, additive) SYSTEM turns: what kind of event (tool_response | document | notice). */
+  kind?: string;
 }
 
 export interface ClientRuntimeConfig {
@@ -58,6 +62,14 @@ export interface SessionSnapshot {
   elapsedMs: number;
   maxDurationSec: number;
   muted: boolean;
+  /** (B, additive) Conversation phase: opening | agenda | closing | ended. */
+  phase?: string;
+  /** (B, additive) Agenda progress for optional progress UI. */
+  progress?: { covered: number; total: number };
+  /** (B, additive) Voice mode actually used (may differ from the scenario's request after a fallback). */
+  voiceMode?: VoiceMode;
+  /** (B, additive) Human-readable provider fallbacks (e.g. realtime requested but not configured). */
+  fallbacks?: string[];
 }
 
 export interface PresentedTool {
@@ -69,6 +81,19 @@ export interface PresentedTool {
   data?: Record<string, unknown>;
   closed?: boolean;
 }
+
+/*
+ * Protocol notes (runtime, workstream B):
+ * - `hello` must be the first message (within 10 s). `lastSeq` (optional) = highest turn seq the client
+ *   already has; `welcome.transcript` then contains only turns with a greater seq (full transcript otherwise).
+ * - One active connection per session: a newer `hello` supersedes the old socket (closed with SUPERSEDED).
+ * - Agent turns stream as agent.start → agent.delta* → agent.end; the persisted turn follows as turn.saved
+ *   with the same id as agent.start's turnId. agent.cancel means the generation was dropped (nothing saved).
+ * - Send `participant.speaking` true/false around speech and `agent.playback` started/completed/interrupted
+ *   (with spokenChars) so barge-in truncation and "wait for the goodbye to finish" work.
+ * - Limits: participant.final text ≤ 4000 chars, partial ≤ 2000, tool payloads ≤ 20 KB, client.event data
+ *   ≤ 4 KB, ~40 messages/s sustained. Oversized messages get a non-fatal `error` (code "too_large").
+ */
 
 // ── Client → Server ──
 export type ClientMessage =
@@ -118,11 +143,21 @@ export type ServerMessage =
   | { type: 'agent.end'; turnId: string; text: string; interrupted?: boolean }
   | { type: 'agent.audio'; turnId: string; seq: number; mime: string; data: string; final?: boolean }
   | { type: 'agent.cancel'; turnId: string }
+  /**
+   * A turn was persisted. May be sent again for the same turn id when it changes (e.g. an agent turn
+   * truncated to what was actually spoken after a barge-in) — clients should upsert by `turn.id`.
+   */
   | { type: 'turn.saved'; turn: TurnDTO }
   | { type: 'tool.present'; tool: PresentedTool }
   | { type: 'tool.update'; toolCallId: string; data: Record<string, unknown> }
   | { type: 'tool.close'; toolCallId: string }
   | { type: 'realtime.tool_result'; callId: string; output: string }
+  /**
+   * (B, additive) Realtime mode only: an instruction for the realtime model (timed nudge, wrap-up, closing).
+   * The client forwards it on the data channel as a `conversation.item.create` with role "system"
+   * (input_text) and, when `respond` is true, follows with `response.create`.
+   */
+  | { type: 'realtime.instruction'; text: string; respond?: boolean }
   | { type: 'timer'; elapsedMs: number; remainingMs: number }
   | { type: 'notice'; level: 'info' | 'warning'; message: string }
   | { type: 'end'; reason: string; endedBy: string }

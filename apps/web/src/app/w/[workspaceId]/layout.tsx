@@ -43,6 +43,7 @@ const NAV: NavGroup[] = [
       { href: '/settings/branding', label: 'Branding', cap: 'branding.manage' },
       { href: '/settings/usage', label: 'Usage & quotas', cap: 'usage.view' },
       { href: '/settings/providers', label: 'AI providers', cap: 'providers.manage' },
+      { href: '/settings/functions', label: 'Custom functions', cap: 'providers.manage' },
       { href: '/channels', label: 'Phone & meetings', cap: 'channels.manage' },
       { href: '/settings/developer', label: 'API & webhooks', cap: 'apikeys.manage' },
       { href: '/settings/audit', label: 'Audit log', cap: 'audit.view' },

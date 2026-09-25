@@ -39,9 +39,9 @@ export function sanitizeText(input: string): string {
       // C0 controls except \t (09) and \n (0A); DEL and C1 controls
       .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, ' ')
       // zero-width, word joiner, BOM, bidi embedding/override/isolate controls, soft hyphen
-      .replace(/[­᠎​-‏‪-‮⁠-⁤⁦-⁯﻿]/g, '')
+      .replace(/[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g, '')
       // Unicode line/paragraph separators → newline
-      .replace(/[  ]/g, '\n')
+      .replace(/[\u2028\u2029]/g, '\n')
   );
 }
 

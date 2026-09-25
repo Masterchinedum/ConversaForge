@@ -127,6 +127,8 @@ export function decideAttempt(input: {
   sessionState: string;
   analysisSkipped: boolean;
   evaluation: { id: string; status: string; overallScore: number | null; insufficientEvidence: boolean } | null;
+  /** Whether the participant may see numeric scores (scenario config); the reason text hides numbers otherwise. */
+  scoresVisible?: boolean;
 }): AttemptDecision {
   const { rule, sessionState, evaluation } = input;
   const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'ABANDONED'];
@@ -162,7 +164,10 @@ export function decideAttempt(input: {
       if (evaluation.overallScore < rule.minScore) {
         return {
           status: 'FAILED',
-          reason: `Score ${Math.round(evaluation.overallScore)} is below the required ${rule.minScore}.`,
+          reason:
+            input.scoresVisible === false
+              ? 'The score did not reach the pass mark for this item — you can try again.'
+              : `Score ${Math.round(evaluation.overallScore)} is below the required ${rule.minScore}.`,
           score: evaluation.overallScore,
           evaluationId: evaluation.id,
         };
@@ -189,5 +194,20 @@ export function isSafeHttpsUrl(raw: string): boolean {
     if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return false;
   }
   if (host.startsWith('[')) return false; // IPv6 literals — not needed for course content
+  return true;
+}
+
+/**
+ * Mirrors the participant-report rule: a learner sees numeric scores only when the scenario version lets
+ * participants see scores, the rubric is visible to participants, and any required human review is done.
+ */
+export function participantCanSeeScores(
+  config: unknown,
+  evaluation?: { humanReviewRequired?: boolean | null; reviewedAt?: Date | null } | null,
+): boolean {
+  const c = (config ?? {}) as { analysis?: { enabled?: boolean; participantCanSeeScores?: boolean }; rubric?: { enabled?: boolean; visibility?: string } };
+  if (c.analysis?.enabled === false || c.analysis?.participantCanSeeScores !== true) return false;
+  if (c.rubric?.enabled === false || c.rubric?.visibility !== 'participant_and_reviewers') return false;
+  if (evaluation?.humanReviewRequired && !evaluation.reviewedAt) return false;
   return true;
 }

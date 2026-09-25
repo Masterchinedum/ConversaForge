@@ -93,6 +93,8 @@ export interface VoiceClient {
   handleServerAudio?(msg: { turnId: string; seq: number; mime: string; data: string; final?: boolean }): void;
   /** Realtime adapter: return a tool result to the model. */
   sendToolResult?(callId: string, output: string): void;
+  /** Realtime adapter: inject a server instruction (system message) and optionally request a response. */
+  sendInstruction?(text: string, respond?: boolean): void;
   on<E extends keyof VoiceEvents>(event: E, fn: VoiceEvents[E]): () => void;
 }
 

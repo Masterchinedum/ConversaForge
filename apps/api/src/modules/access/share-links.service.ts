@@ -101,6 +101,50 @@ export class ShareLinksService {
     };
   }
 
+  /** Everything the access page needs about the scenario (versions for pinning, variable allowlist, channels). */
+  async accessSummary(workspaceId: string, scenarioId: string) {
+    const scenario = await this.scenarioOr404(workspaceId, scenarioId);
+    const versions = await this.prisma.scenarioVersion.findMany({
+      where: { scenarioId, workspaceId },
+      select: { id: true, version: true, publishedAt: true, changeNote: true },
+      orderBy: { version: 'desc' },
+      take: 100,
+    });
+    let config: Awaited<ReturnType<typeof loadRunnableScenario>>['config'] | null = null;
+    try {
+      config = (await loadRunnableScenario(this.prisma, workspaceId, scenarioId)).config;
+    } catch {
+      config = null;
+    }
+    const [links, grants, tokens] = await Promise.all([
+      this.prisma.shareLink.count({ where: { workspaceId, scenarioId, revokedAt: null } }),
+      this.prisma.scenarioGrant.count({ where: { workspaceId, scenarioId, revokedAt: null } }),
+      this.prisma.accessToken.count({ where: { workspaceId, scenarioId, revokedAt: null, expiresAt: { gt: new Date() } } }),
+    ]);
+    const ws = await this.prisma.workspace.findUnique({ where: { id: workspaceId }, select: { settings: true } });
+    return {
+      scenario: {
+        id: scenario.id,
+        name: scenario.name,
+        privacy: scenario.privacy,
+        status: scenario.status,
+        galleryListed: scenario.galleryListed,
+        latestVersionId: scenario.latestVersionId,
+        latestVersionNumber: scenario.latestVersionNumber,
+        archived: !!scenario.archivedAt || scenario.status === 'ARCHIVED',
+      },
+      runnable: !!config,
+      versions,
+      variables: config?.variables.allowlist.map((v) => ({ key: v.key, label: v.label || v.key, required: v.required, maxLength: v.maxLength })) ?? [],
+      identityModeDefault: config?.access.identityMode ?? 'NAME_EMAIL',
+      defaultAttemptLimitPerEmail: config?.access.defaultAttemptLimitPerEmail ?? null,
+      channels: { browser: config?.channels.browser.enabled ?? false, embed: config?.channels.embed.enabled ?? false },
+      allowPublicScenarios: ((ws?.settings ?? {}) as { allowPublicScenarios?: boolean }).allowPublicScenarios !== false,
+      publicUrl: `${env.WEB_PUBLIC_URL.replace(/\/$/, '')}/p/${scenario.id}`,
+      counts: { activeLinks: links, activeGrants: grants, activeTokens: tokens },
+    };
+  }
+
   async list(workspaceId: string, scenarioId: string) {
     await this.scenarioOr404(workspaceId, scenarioId);
     const links = await this.prisma.shareLink.findMany({

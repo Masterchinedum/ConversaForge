@@ -95,7 +95,19 @@ export class LlmService {
     });
     if (conn) {
       try {
-        return { secret: this.crypto.decrypt(conn.encryptedSecret), config: (conn.config as Record<string, unknown>) ?? {}, source: 'workspace' };
+        let secret = this.crypto.decrypt(conn.encryptedSecret);
+        const config = (conn.config as Record<string, unknown>) ?? {};
+        // Workstream G stores Twilio credentials as JSON {accountSid, authToken}; expose the same
+        // "sid:token" format as the environment fallback so consumers handle one shape.
+        if (provider === 'twilio' && secret.startsWith('{')) {
+          try {
+            const j = JSON.parse(secret) as { accountSid?: string; authToken?: string };
+            if (j.accountSid && j.authToken) secret = `${j.accountSid}:${j.authToken}`;
+          } catch {
+            /* keep raw */
+          }
+        }
+        if (secret) return { secret, config, source: 'workspace' };
       } catch {
         /* fall through to env */
       }

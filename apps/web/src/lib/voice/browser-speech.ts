@@ -14,7 +14,8 @@
 
 import { EndOfTurnDetector } from './end-of-turn';
 import { EnergyVad } from './vad';
-import { isLikelyEcho, SynthSpeaker } from './synth';
+import { isLikelyEcho } from './synth';
+import type { AgentSpeaker } from './speaker';
 import { Emitter, type SpeakOptions, type VoiceClient, type VoiceClientOptions, type VoiceEvents } from './types';
 import { randomId } from '../live/token';
 
@@ -31,7 +32,7 @@ const PARTIAL_THROTTLE_MS = 250;
 export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceClient {
   readonly mode = 'browser' as const;
   readonly listens = true;
-  readonly speaks = true;
+  readonly speaks: boolean;
 
   private rec: SR | null = null;
   private running = false;
@@ -49,15 +50,19 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
   private fatal = false;
   private detector: EndOfTurnDetector;
   private vad: EnergyVad | null = null;
-  private synth: SynthSpeaker;
+  private unsubs: Array<() => void> = [];
   private clientTurnId: string | null = null;
   private lastPartialAt = 0;
   private partialTimer: ReturnType<typeof setTimeout> | null = null;
   private speakingFlag = false;
   private pttReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private o: VoiceClientOptions) {
+  constructor(
+    private o: VoiceClientOptions,
+    private speaker: AgentSpeaker | null,
+  ) {
     super();
+    this.speaks = !!speaker;
     this.ptt = o.turnTaking.mode === 'push_to_talk';
     this.detector = new EndOfTurnDetector(
       { silenceMs: o.turnTaking.endOfTurnSilenceMs, graceMs: o.turnTaking.thinkingPauseGraceMs },
@@ -78,9 +83,14 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
         onThinking: (w) => this.emit('thinking', w),
       },
     );
-    this.synth = new SynthSpeaker(o.language, o.voice.voiceId, o.voice.speed);
-    this.synth.on('playback', (turnId, ev, chars) => this.emit('playback', turnId, ev, chars));
-    this.synth.on('audible', (a) => this.onAgentAudible(a));
+    if (speaker) {
+      this.unsubs.push(
+        speaker.on('playback', (turnId, ev, chars) => this.emit('playback', turnId, ev, chars)),
+        speaker.on('audible', (a) => this.onAgentAudible(a)),
+        speaker.on('error', (e) => this.emit('error', e)),
+        speaker.on('notice', (m) => this.emit('notice', m)),
+      );
+    }
   }
 
   async start(): Promise<void> {
@@ -322,7 +332,8 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
     this.vad?.stop();
     this.vad = null;
     this.detector.dispose();
-    this.synth.dispose();
+    this.unsubs.forEach((u) => u());
+    this.speaker?.dispose();
   }
 
   setMuted(muted: boolean): void {
@@ -333,6 +344,7 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
 
   setPaused(paused: boolean): void {
     this.paused = paused;
+    this.speaker?.setPaused(paused);
     if (paused) {
       this.cancelSpeech('local');
       this.detector.commitNow();
@@ -345,11 +357,15 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
     this.currentAgentTurn = turnId;
     this.agentTexts.set(turnId, `${this.agentTexts.get(turnId) ?? ''} ${text}`.trim());
     if (this.agentTexts.size > 10) this.agentTexts.delete(this.agentTexts.keys().next().value!);
-    this.synth.speak(turnId, text, opts?.final);
+    this.speaker?.speak(turnId, text, opts?.final);
+  }
+
+  handleServerAudio(msg: { turnId: string; seq: number; mime: string; data: string; final?: boolean }) {
+    this.speaker?.handleServerAudio?.(msg);
   }
 
   cancelSpeech(_reason?: 'barge_in' | 'server' | 'local'): void {
-    this.synth.cancel(); // emits playback 'interrupted' via the synth listener
+    this.speaker?.cancel(); // emits playback 'interrupted' via the speaker listener
     this.onAgentAudible(false);
   }
 

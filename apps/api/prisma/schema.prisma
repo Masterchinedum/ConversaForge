@@ -612,6 +612,7 @@ model Session {
   @@index([participantId])
   @@index([state])
   @@index([shareLinkId])
+  @@index([externalRef]) // (H) telephony call sid / meeting bot id lookups
 }
 
 model SessionEvent {
@@ -1063,6 +1064,10 @@ model WebhookSubscription {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   disabledAt      DateTime?
+  // (H) secret rotation: the previous secret keeps signing (second v1=) until it expires.
+  previousEncryptedSecret String?
+  previousSecretExpiresAt DateTime?
+  disabledReason  String?
   deliveries      WebhookDelivery[]
 
   @@index([workspaceId])
@@ -1084,8 +1089,28 @@ model WebhookDelivery {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  attemptLog     WebhookDeliveryAttempt[]
 
   @@unique([subscriptionId, eventId])
+  @@index([workspaceId, createdAt])
+  @@index([status, nextAttemptAt])
+}
+
+/// (H) One row per HTTP attempt of a webhook delivery (status code / error / timing).
+model WebhookDeliveryAttempt {
+  id              String          @id @default(cuid())
+  deliveryId      String
+  workspaceId     String
+  attempt         Int
+  manual          Boolean         @default(false)
+  statusCode      Int?
+  error           String?
+  responseSnippet String?
+  durationMs      Int?
+  createdAt       DateTime        @default(now())
+  delivery        WebhookDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([deliveryId, attempt])
   @@index([workspaceId, createdAt])
 }
 
@@ -1115,6 +1140,11 @@ model OutboundCallBatch {
   scheduledAt DateTime?
   status      String   @default("DRAFT") // DRAFT | SCHEDULED | RUNNING | COMPLETED | CANCELLED | BLOCKED
   concurrency Int      @default(1)
+  // (H) additive
+  statusReason String?
+  variables    Json      @default("{}") // batch-level runtime variables (per-target values win)
+  startedAt    DateTime?
+  completedAt  DateTime?
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1134,6 +1164,8 @@ model OutboundCallTarget {
   sessionId   String?
   attempts    Int               @default(0)
   lastError   String?
+  callSid     String? // (H) Twilio call sid of the latest attempt
+  externalId  String? // (H) participant external id (CSV column)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   batch       OutboundCallBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
@@ -1153,6 +1185,10 @@ model MeetingBot {
   providerBotId   String?
   sessionId       String?
   lastError       String?
+  // (H) additive
+  botName              String?
+  evaluatedSpeakerName String? // transcript speakers with this name are the evaluated participant
+  lastEventAt          DateTime?
   createdById     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
