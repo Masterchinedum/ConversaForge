@@ -15,7 +15,8 @@
     "db:push": "prisma db push --skip-generate",
     "seed": "tsx prisma/seed.ts",
     "db:sync": "bash scripts-db-sync.sh",
-    "compile": "tsc -p tsconfig.build.json"
+    "compile": "tsc -p tsconfig.build.json",
+    "test:prepare": "bash -c 'createdb -h localhost -U postgres conversaforge_test 2>/dev/null; DB=postgresql://postgres:postgres@localhost:5432/conversaforge_test; DATABASE_URL=$DB npx prisma db push --skip-generate --accept-data-loss && psql $DB -q -f prisma/sql/post-push.sql'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.128.0",
@@ -80,6 +81,7 @@
       ]
     },
     "testEnvironment": "node",
-    "testTimeout": 30000
+    "testTimeout": 30000,
+    "globalSetup": "<rootDir>/test/global-setup.ts"
   }
 }

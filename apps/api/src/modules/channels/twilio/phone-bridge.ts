@@ -134,8 +134,11 @@ export class PhoneBridge {
     conn.receive({ type: 'start' });
   }
 
+  /** Agent audio has actually started playing for the current turn and has not finished. */
   get isPlaying() {
-    return this.pendingMarks.size > 0 || (!!this.turn && !this.turn.interrupted && this.turn.charsQueued > this.turn.charsSent);
+    const t = this.turn;
+    if (!t || t.interrupted || t.startedAt === null) return false;
+    return this.pendingMarks.size > 0 || !t.ended || t.charsQueued > t.charsSent;
   }
 
   // ───────────── Twilio → engine ─────────────
@@ -204,7 +207,7 @@ export class PhoneBridge {
       } catch (e: any) {
         this.hooks.log('warn', `STT failed for ${this.setup.sessionId}#${n}: ${e?.message}`);
       }
-    });
+    }).catch(() => undefined);
   }
 
   private bargeIn() {
@@ -254,7 +257,7 @@ export class PhoneBridge {
           const mark = `${MARK_PREFIX}${t.turnId}`;
           this.pendingMarks.add(mark);
           this.toTwilio({ event: 'mark', streamSid: this.streamSid, mark: { name: mark } });
-        });
+        }).catch((e) => this.hooks.log('error', `Mark failed for ${this.setup.sessionId}: ${e?.message ?? e}`));
         return;
       }
       case 'agent.cancel': {
@@ -293,6 +296,7 @@ export class PhoneBridge {
     const seg = ++t.seg;
     t.charsQueued += text.length;
     const synth = this.synthesize(text); // start synthesis now, play in order
+    synth.catch(() => undefined); // handled when awaited below; avoid an unhandled rejection meanwhile
     t.chain = t.chain.then(async () => {
       let mulaw: Buffer | null = null;
       try {
@@ -310,7 +314,7 @@ export class PhoneBridge {
       for (const f of frames(mulaw)) this.toTwilio({ event: 'media', streamSid: this.streamSid, media: { payload: f.toString('base64') } });
       t.audioMs += (mulaw.length / 8000) * 1000;
       t.charsSent += text.length;
-    });
+    }).catch((e) => this.hooks.log('error', `Playback failed for ${this.setup.sessionId}: ${e?.message ?? e}`));
   }
 
   private async synthesize(text: string): Promise<{ mulaw: Buffer; provider: string; model: string }> {

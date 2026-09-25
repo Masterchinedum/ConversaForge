@@ -232,6 +232,31 @@ describe('PhoneBridge', () => {
     expect(t.received).toContainEqual({ type: 'agent.playback', turnId: 'a1', event: 'completed' });
   });
 
+  it('a failing TTS segment queued behind a slow one never causes an unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const t = setup();
+      let call = 0;
+      (t.bridge as any).setup.tts.synthesize = async () => {
+        call++;
+        if (call === 1) {
+          await new Promise((r) => setTimeout(r, 30));
+          return { audio: Buffer.alloc(160, 0xff), mimeType: 'audio/basic', characters: 1, provider: 'elevenlabs', model: 'x' };
+        }
+        throw new Error('403');
+      };
+      t.bridge.transport.send({ type: 'agent.start', turnId: 'a1' });
+      t.bridge.transport.send({ type: 'agent.end', turnId: 'a1', text: 'First sentence. Second sentence.' });
+      await new Promise((r) => setTimeout(r, 80));
+      expect(unhandled).toEqual([]);
+      expect(t.toTwilio.filter((m) => m.event === 'media')).toHaveLength(1);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('agent end → closes the stream after playback; caller stop → hangup hook', async () => {
     const t = setup();
     t.bridge.transport.send({ type: 'end', reason: 'completed', endedBy: 'agent' });

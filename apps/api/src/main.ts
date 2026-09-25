@@ -18,7 +18,9 @@ async function bootstrap() {
   const { AppModule } = await import('./app.module');
 
   const adapter = new FastifyAdapter({
-    trustProxy: true,
+    // Only trust X-Forwarded-For from our own proxies (Caddy/Next on private networks), so clients
+    // cannot spoof their IP to evade rate limits. Override with TRUST_PROXY (proxy-addr syntax).
+    trustProxy: env.TRUST_PROXY,
     bodyLimit: 12 * 1024 * 1024,
     // Signed media/download tokens travel as a path param (/api/media/signed/<token>); Fastify's default
     // maxParamLength (100) would reject them with 414.

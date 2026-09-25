@@ -33,6 +33,8 @@ const EnvSchema = z.object({
   /** HMAC secret for signed media URLs and misc tokens. */
   SIGNING_SECRET: z.string().min(32),
   COOKIE_SECURE: bool,
+  /** Addresses/ranges whose X-Forwarded-For is trusted (proxy-addr syntax, comma separated). */
+  TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
 
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
