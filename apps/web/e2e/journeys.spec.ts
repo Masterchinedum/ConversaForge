@@ -839,8 +839,9 @@ test.describe('5. learner', () => {
     await joinTyped(page, { record: false });
     await finishConversation(page, ['Hi Alex, ready to go.']);
     await shot(page, '5-02-end-with-back');
-    await page.getByRole('link', { name: 'Back to course' }).click();
-    await page.waitForURL(/\/learn\/courses\//);
+    // Play All: the end screen shows a cancellable countdown and returns to the course by itself.
+    await expect(page.getByRole('link', { name: /Continue course \(\d+\)/ })).toBeVisible();
+    await page.waitForURL(/\/learn\/courses\//, { timeout: 30_000 });
     await expect(page.getByText('33% complete')).toBeVisible({ timeout: 60_000 });
     await shot(page, '5-03-course-33');
     // Play All moved on to the link item and opened it in the viewer; close it and stop Play All.
