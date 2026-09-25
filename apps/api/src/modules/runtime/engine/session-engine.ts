@@ -636,7 +636,15 @@ export class SessionEngine {
   // ───────────────────────────── tools (participant side) ─────────────────────────────
 
   private toolCtx(actor: 'AGENT' | 'PARTICIPANT' | 'SYSTEM') {
-    return { sessionId: this.id, workspaceId: this.session.workspaceId, config: this.config, state: this.state, elapsedMs: this.elapsedMs(), actor };
+    return {
+      sessionId: this.id,
+      workspaceId: this.session.workspaceId,
+      scenarioVersionId: this.session.scenarioVersionId,
+      config: this.config,
+      state: this.state,
+      elapsedMs: this.elapsedMs(),
+      actor,
+    };
   }
 
   private async onToolOpen(toolId: string) {

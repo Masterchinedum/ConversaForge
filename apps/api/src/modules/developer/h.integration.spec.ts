@@ -104,7 +104,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
   });
 
   async function createKey(token: string, ws: string, scopes: string[], extra: Record<string, unknown> = {}) {
-    const r = await inject({ method: 'POST', url: `/api/workspaces/${ws}/api-keys`, headers: { ...json, ...auth(token) }, payload: { name: `k-${scopes.join('-')}`, scopes, ...extra } });
+    const r = await inject({ method: 'POST', url: `/api/workspaces/${ws}/api-keys`, headers: { ...json, ...auth(token) }, payload: { name: `k-${scopes.join('-')}`.slice(0, 100), scopes, ...extra } });
     if (r.statusCode !== 201) throw new Error(`createKey ${r.statusCode}: ${r.body}`);
     return r.json();
   }

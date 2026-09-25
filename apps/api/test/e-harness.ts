@@ -50,6 +50,8 @@ export class Harness {
     // cannot run. Tests authenticate with bearer session tokens instead (AuthGuard accepts both).
     await this.app.register(multipart as any, { limits: { fileSize: 200 * 1024 * 1024, files: 1 } });
     this.app.setGlobalPrefix('api', { exclude: ['health'] });
+    const { WsAdapter } = await import('@nestjs/platform-ws');
+    this.app.useWebSocketAdapter(new WsAdapter(this.app));
     await this.app.init();
     await this.app.getHttpAdapter().getInstance().ready();
     const { PrismaService } = await import('../src/common/prisma/prisma.service');

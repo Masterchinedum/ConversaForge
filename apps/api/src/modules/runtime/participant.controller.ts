@@ -6,7 +6,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Public } from '../../common/auth/decorators';
-import { Errors } from '../../common/http/errors';
+import { AppError, Errors } from '../../common/http/errors';
 import { ZodPipe } from '../../common/http/zod.pipe';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
@@ -238,10 +238,15 @@ export class ParticipantController {
     let pageCount: number | null = null;
     let extractError: string | null = null;
     try {
-      const r = await this.extract(buf, effectiveMime);
+      const r = await this.extract(buf, effectiveMime, fileName);
       text = r.text;
       pageCount = r.pageCount ?? null;
     } catch (e) {
+      // Invalid/unsupported documents are the participant's to fix; other failures degrade to "no text".
+      if (e instanceof AppError && e.getStatus() < 500) {
+        await this.storage.delete(key).catch(() => undefined);
+        throw e;
+      }
       extractError = (e as Error).message?.slice(0, 200) ?? 'extraction failed';
     }
     text = text.replace(/\u0000/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -264,9 +269,9 @@ export class ParticipantController {
     return { assetId: asset.id, fileName, textPreview: text.slice(0, 500), chars: text.length, pageCount, ...(extractError ? { warning: 'Text could not be extracted from this file' } : {}) };
   }
 
-  private async extract(buf: Buffer, mime: string): Promise<{ text: string; pageCount?: number | null }> {
+  private async extract(buf: Buffer, mime: string, fileName: string): Promise<{ text: string; pageCount?: number | null }> {
     const ext = this.optional.extractor();
-    if (ext) return ext.extractText(buf, mime);
+    if (ext) return ext.extractText(buf, mime, { fileName, maxChars: 200_000, maxBytes: UPLOAD_LIMITS.toolDocument.maxBytes });
     if (mime === 'text/plain' || mime === 'text/markdown') return { text: buf.toString('utf8').slice(0, 200_000), pageCount: null };
     if (mime === 'application/pdf') {
       const { extractText, getDocumentProxy } = await import('unpdf');

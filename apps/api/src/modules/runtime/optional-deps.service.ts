@@ -23,7 +23,11 @@ export interface KnowledgeHit {
 }
 export interface KnowledgeLike {
   search(workspaceId: string, documentIds: string[], query: string, topK: number): Promise<KnowledgeHit[]>;
-  extractText?(buffer: Buffer, mimeType: string): Promise<{ text: string; pageCount?: number | null }>;
+  extractText?(
+    buffer: Buffer,
+    mimeType: string,
+    opts?: { fileName?: string | null; maxChars?: number; maxBytes?: number },
+  ): Promise<{ text: string; pageCount?: number | null }>;
 }
 export interface CustomFunctionsLike {
   execute(

@@ -21,6 +21,7 @@ const CONTINUATION_TOOLS = new Set(['knowledge_search']);
 
 export interface ToolContext {
   sessionId: string;
+  scenarioVersionId?: string;
   workspaceId: string;
   config: ScenarioConfig;
   state: RuntimeState;
@@ -205,7 +206,13 @@ export class ToolRegistry {
       const errors = validateJsonSchema(fn.parametersSchema, call.input);
       if (errors.length) return fail('Invalid arguments', errors);
       try {
-        const res = await svc.execute(ctx.workspaceId, fn.id, call.input, { sessionId, source: 'runtime' });
+        // The runtime writes its own ToolEvent rows, so the functions service must not log a duplicate.
+        const res = await svc.execute(ctx.workspaceId, fn.id, call.input, {
+          sessionId,
+          toolCallId: call.id,
+          scenarioVersionId: ctx.scenarioVersionId ?? null,
+          logToolEvent: false,
+        });
         if (!res.ok) return fail(res.error ?? 'The function failed');
         const json = JSON.stringify(res.result ?? null).slice(0, 8000);
         await this.audit(sessionId, call.name, call.id, 'RESULT', actor, call.input, { result: json.slice(0, 2000) });
