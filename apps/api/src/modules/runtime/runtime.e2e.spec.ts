@@ -150,7 +150,8 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
     return { ...fx, scenario, version: latest, ...body };
   }
 
-  const rest = (path: string, token: string, init: RequestInit = {}) =>
+  type JsonResponse = Omit<Response, 'json'> & { json(): Promise<any> };
+  const rest = (path: string, token: string, init: RequestInit = {}): Promise<JsonResponse> =>
     fetch(`${base}/api/runtime/sessions/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) } });
 
   async function consent(s: { sessionId: string; sessionToken: string }, body = { recordAudio: true, recordVideo: false, analysis: true }) {

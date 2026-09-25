@@ -153,7 +153,7 @@ export default function ProvidersSettingsPage() {
                     <Td>
                       {c.simulated ? <SimulatedBadge what="Simulator (no key)" /> : <Badge tone={SOURCE_BADGE[c.source].tone}>{SOURCE_BADGE[c.source].label}</Badge>}
                     </Td>
-                    <Td className="min-w-[16rem] whitespace-normal text-sm text-slate-700">{c.message}</Td>
+                    <Td className="min-w-[16rem] !whitespace-normal text-sm text-slate-700">{c.message}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -184,7 +184,6 @@ export default function ProvidersSettingsPage() {
                 <Th>Status</Th>
                 <Th className="hidden lg:table-cell">Used for</Th>
                 <Th className="hidden md:table-cell">Key</Th>
-                <Th className="hidden xl:table-cell">Last verified</Th>
                 <Th>
                   <span className="sr-only">Actions</span>
                 </Th>
@@ -206,10 +205,10 @@ export default function ProvidersSettingsPage() {
                     ) : (
                       <Badge>Revoked</Badge>
                     )}
+                    {c.lastVerifiedAt && <div className="mt-0.5 text-[11px] text-slate-500">checked {formatDate(c.lastVerifiedAt)}</div>}
                   </Td>
-                  <Td className="hidden whitespace-normal text-xs lg:table-cell">{c.capabilities.map((k) => KIND_LABEL[k]).join(', ')}</Td>
+                  <Td className="hidden max-w-[14rem] !whitespace-normal text-xs lg:table-cell">{c.capabilities.map((k) => KIND_LABEL[k]).join(', ')}</Td>
                   <Td className="hidden md:table-cell font-mono text-xs">{c.secretLast4 ? `••••${c.secretLast4}` : '••••'}</Td>
-                  <Td className="hidden text-xs xl:table-cell">{formatDate(c.lastVerifiedAt)}</Td>
                   <Td>
                     <div className="flex justify-end gap-1">
                       <Button size="sm" variant="ghost" loading={busyId === c.id} onClick={() => verify(c)}>
