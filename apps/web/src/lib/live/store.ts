@@ -172,6 +172,8 @@ function serverReducer(s: LiveState, m: ServerMessage): LiveState {
         fatal: null,
       };
       for (const tool of m.tools) next = withTool(next, tool);
+      // Provider fallbacks decided by the server (e.g. realtime requested but not configured).
+      for (const f of m.session.fallbacks ?? []) next = addNotice(next, 'info', f);
       return next;
     }
     case 'state':

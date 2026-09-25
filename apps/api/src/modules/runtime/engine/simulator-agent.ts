@@ -96,7 +96,16 @@ export function topicQuestion(
     .replace(/\bthem\b/gi, 'you')
     .replace(/\bthe (candidate|participant|learner)'s\b/gi, 'your');
   const wantsExample = /\b(time|example|situation|experience|accomplishment|project|challenge|decision|mistake|conflict|disagreement)\b/i.test(topic);
-  return { lead, question: `I'd like to hear about ${topic}. Could you tell me about that${wantsExample ? ', with a specific example' : ''}?` };
+  // If the author's guidance contains a question, ask it (it is usually phrased for speech).
+  const guidedQ = substituteVariables(item.guidance ?? '', variables)
+    .split(/(?<=[.?!])\s+/)
+    .find((sentence) => /\?$/.test(sentence.trim()) && sentence.trim().split(/\s+/).length >= 4);
+  if (guidedQ) return { lead, question: guidedQ.trim() };
+  const example = wantsExample ? ', with a specific example' : '';
+  // Bare noun phrases ("brief introduction and current role") read badly after "hear about".
+  const hasDeterminer = /^(a|an|the|your|my|our|how|what|why|when|where|which|who|whether|any|some|one|two|three|\w+ing)\b/i.test(topic);
+  if (!hasDeterminer) return { lead, question: `Next, let's cover: ${topic}. Could you walk me through that${example}?` };
+  return { lead, question: `I'd like to hear about ${topic}. Could you tell me about that${example}?` };
 }
 
 const SENTENCE_STARTERS = new Set(['during', 'after', 'before', 'while', 'since', 'last', 'this', 'when', 'then', 'at', 'in', 'on', 'our', 'we', 'so', 'also', 'once', 'recently', 'initially']);
