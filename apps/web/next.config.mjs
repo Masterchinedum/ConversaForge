@@ -12,6 +12,12 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@cf/shared'],
   poweredByHeader: false,
+  experimental: {
+    // The /api/* rewrite proxy buffers request bodies and truncates them at 10 MB by default, which
+    // breaks uploads (knowledge documents up to 25 MB, course assets up to 200 MB). The API enforces
+    // the real per-endpoint limits.
+    middlewareClientMaxBodySize: '210mb',
+  },
   // No server-side image optimization (avoids the native sharp/libvips dependency).
   images: { unoptimized: true },
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,

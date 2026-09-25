@@ -951,6 +951,8 @@ export class SessionEngine {
     let simNext: RuntimeState['sim'] | null = null;
     let stopReason = 'end_turn';
     let rounds = 0;
+    const t0 = Date.now();
+    let ttftMs: number | null = null;
     this.send({ type: 'agent.start', turnId: g.turnId });
 
     try {
@@ -987,6 +989,7 @@ export class SessionEngine {
             // Separate text from successive rounds with a space.
             const piece = rounds > 0 && !roundText && g.text && !/\s$/.test(g.text) ? ` ${ev.text}` : ev.text;
             roundText += ev.text;
+            if (ttftMs === null) ttftMs = Date.now() - t0;
             g.text += piece;
             this.send({ type: 'agent.delta', turnId: g.turnId, text: piece });
           } else if (ev.type === 'tool_call') {
@@ -1075,6 +1078,21 @@ export class SessionEngine {
       } else {
         this.send({ type: 'agent.cancel', turnId: g.turnId });
       }
+      await this.logEvent('provider.turn', {
+        turnId: g.turnId,
+        provider: llm.provider.id,
+        model: llm.model,
+        simulated: llm.simulated,
+        trigger: g.trigger.kind,
+        rounds: rounds + 1,
+        stopReason,
+        ttftMs,
+        totalMs: Date.now() - t0,
+        inputTokens: g.usages.reduce((a, u) => a + u.inputTokens, 0),
+        outputTokens: g.usages.reduce((a, u) => a + u.outputTokens, 0),
+        cacheReadTokens: g.usages.reduce((a, u) => a + (u.cacheReadTokens ?? 0), 0),
+        tools: outcomes.map((o) => o.name),
+      });
       await this.recordUsage(g, turn?.seq ?? null);
       if (endOutcome && this.currentState === 'ACTIVE') {
         await this.beginAgentEnding(endOutcome.reason, turn?.id ?? null, text);

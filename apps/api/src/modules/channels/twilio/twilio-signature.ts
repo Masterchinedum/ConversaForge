@@ -33,13 +33,15 @@ export function urlPortVariants(url: string): string[] {
     const u = new URL(url);
     const def = u.protocol === 'https:' ? '443' : u.protocol === 'http:' ? '80' : '';
     if (!def) return [...out];
-    if (u.port) {
-      if (u.port === def) {
-        // Remove explicit default port.
-        out.add(url.replace(`${u.hostname}:${def}`, u.hostname));
-      }
-    } else {
-      out.add(url.replace(`://${u.host}`, `://${u.hostname}:${def}`));
+    // WHATWG URL hides a default port, so detect an explicit one in the string itself.
+    const m = /^([a-z]+:\/\/)([^/?#]+)(.*)$/i.exec(url);
+    if (!m) return [...out];
+    const [, scheme, authority, rest] = m;
+    const explicit = /:(\d+)$/.exec(authority!);
+    if (explicit) {
+      if (explicit[1] === def) out.add(`${scheme}${authority!.slice(0, -explicit[0].length)}${rest}`);
+    } else if (!u.port) {
+      out.add(`${scheme}${authority}:${def}${rest}`);
     }
   } catch {
     /* keep as is */

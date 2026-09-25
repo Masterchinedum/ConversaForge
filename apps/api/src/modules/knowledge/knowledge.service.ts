@@ -74,23 +74,29 @@ export class KnowledgeService implements OnModuleInit {
     const k = Math.min(Math.max(1, Math.floor(topK) || 4), MAX_TOPK);
 
     const docFilter = ids ? Prisma.sql`AND c."documentId" = ANY(${ids}::text[])` : Prisma.empty;
+    // Rank first (cheap), then build ts_headline snippets only for the top-k rows.
     const base = (tsquery: Prisma.Sql) => Prisma.sql`
-      WITH q AS (SELECT ${tsquery} AS query)
-      SELECT c.id AS "chunkId", c."documentId", d.title AS "documentTitle", c.page, c.heading, c.text,
-             ts_headline('english', c.text, q.query,
-               'StartSel=«, StopSel=», MaxWords=45, MinWords=15, ShortWord=2, MaxFragments=2, FragmentDelimiter= … ') AS snippet,
-             ts_rank_cd(c.tsv, q.query, 32)::float8 AS score
-      FROM "KnowledgeChunk" c
-      JOIN "KnowledgeDocument" d ON d.id = c."documentId"
-      CROSS JOIN q
-      WHERE c."workspaceId" = ${workspaceId}
-        AND d."workspaceId" = ${workspaceId}
-        AND d."deletedAt" IS NULL
-        AND d.status = 'COMPLETED'
-        ${docFilter}
-        AND c.tsv @@ q.query
-      ORDER BY score DESC, c."documentId", c.ordinal
-      LIMIT ${k}`;
+      WITH q AS (SELECT ${tsquery} AS query),
+      ranked AS (
+        SELECT c.id, c."documentId", d.title AS "documentTitle", c.page, c.heading, c.text, c.ordinal,
+               ts_rank_cd(c.tsv, q.query, 32)::float8 AS score
+        FROM "KnowledgeChunk" c
+        JOIN "KnowledgeDocument" d ON d.id = c."documentId"
+        CROSS JOIN q
+        WHERE c."workspaceId" = ${workspaceId}
+          AND d."workspaceId" = ${workspaceId}
+          AND d."deletedAt" IS NULL
+          AND d.status = 'COMPLETED'
+          ${docFilter}
+          AND c.tsv @@ q.query
+        ORDER BY score DESC, c."documentId", c.ordinal
+        LIMIT ${k}
+      )
+      SELECT r.id AS "chunkId", r."documentId", r."documentTitle", r.page, r.heading, r.text, r.score,
+             ts_headline('english', r.text, q.query,
+               'StartSel=«, StopSel=», MaxWords=45, MinWords=15, ShortWord=2, MaxFragments=2, FragmentDelimiter= … ') AS snippet
+      FROM ranked r CROSS JOIN q
+      ORDER BY r.score DESC, r."documentId", r.ordinal`;
 
     type Row = Omit<KnowledgeSearchResult, 'score'> & { score: number | string };
     let rows = await this.prisma.$queryRaw<Row[]>(base(Prisma.sql`websearch_to_tsquery('english', ${q})`));

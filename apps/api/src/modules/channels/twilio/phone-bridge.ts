@@ -245,6 +245,12 @@ export class PhoneBridge {
         t.ended = true;
         t.chain = t.chain.then(() => {
           if (t.interrupted || msg.interrupted) return;
+          if (t.audioMs === 0) {
+            // Nothing was played (empty text or TTS failure): don't make the engine wait for a mark.
+            this.conn?.receive({ type: 'agent.playback', turnId: t.turnId, event: 'completed' });
+            if (this.ending && this.pendingMarks.size === 0) this.finishCall('agent ended the call');
+            return;
+          }
           const mark = `${MARK_PREFIX}${t.turnId}`;
           this.pendingMarks.add(mark);
           this.toTwilio({ event: 'mark', streamSid: this.streamSid, mark: { name: mark } });

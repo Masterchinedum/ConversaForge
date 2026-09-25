@@ -13,6 +13,17 @@ export const REDACTED_TEXT = '[redacted — retention policy]';
 export const EXPORT_RETENTION_DAYS = 7;
 const TERMINAL_STATES = ['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'ABANDONED'] as const;
 const BATCH = 100;
+/** Session event types whose payloads are structural (no conversation content) and survive redaction. */
+const KEEP_EVENT_PAYLOADS = [
+  'session.created',
+  'state.changed',
+  'recording.created',
+  'recording.completed',
+  'connection.attached',
+  'connection.detached',
+  'connection.superseded',
+  'engine.recovered',
+];
 
 export const DataRequestBody = z
   .object({
@@ -80,6 +91,11 @@ export class PrivacyService {
     const media = await this.deleteMediaObjects({ sessionId });
     const turns = await this.prisma.transcriptTurn.updateMany({ where: { sessionId, NOT: { text: REDACTED_TEXT } }, data: { text: REDACTED_TEXT, metadata: {} } });
     await this.prisma.toolEvent.updateMany({ where: { sessionId }, data: { args: {}, result: Prisma.DbNull } });
+    // Event payloads can carry client/tool content; keep only structural events intact.
+    await this.prisma.sessionEvent.updateMany({
+      where: { sessionId, type: { notIn: KEEP_EVENT_PAYLOADS } },
+      data: { payload: { redacted: true } },
+    });
     const evals = await this.prisma.evaluation.findMany({ where: { sessionId }, select: { id: true } });
     if (evals.length) {
       const criteria = await this.prisma.criterionScore.findMany({ where: { evaluationId: { in: evals.map((e) => e.id) } }, select: { id: true, evidence: true } });

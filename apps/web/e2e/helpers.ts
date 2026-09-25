@@ -31,10 +31,39 @@ export async function scenarioContext() {
   return ctx;
 }
 
-/** Create a participant session via the member self-run endpoint (workstream B). */
-export async function createSession(): Promise<{ sessionId: string; sessionToken: string; workspaceId: string }> {
+const TOOLS_SCENARIO_NAME = 'E2E tools scenario (ws-c)';
+const TOOL_IDS = ['end_session', 'whiteboard', 'notepad', 'document_upload', 'multiple_choice', 'cards', 'timer'];
+
+/** A published scenario with every participant tool enabled (duplicated from the system-design template). */
+export async function toolsScenarioId(): Promise<string> {
   const a = await apiClient();
-  const { workspaceId, scenarioId } = await scenarioContext();
+  const { workspaceId } = await scenarioContext();
+  const list = await (await a.get(`/api/workspaces/${workspaceId}/scenarios`, { params: { limit: 100 } })).json();
+  const rows: any[] = list.data ?? list;
+  const existing = rows.find((s) => s.name === TOOLS_SCENARIO_NAME && s.status === 'PUBLISHED');
+  if (existing) return existing.id;
+  const source = rows.find((s) => s.name === 'System design interview') ?? rows[0];
+  const created = await (await a.post(`/api/workspaces/${workspaceId}/scenarios`, { data: { source: 'duplicate', scenarioId: source.id, name: TOOLS_SCENARIO_NAME } })).json();
+  const id = created.scenario.id;
+  const detail = await (await a.get(`/api/workspaces/${workspaceId}/scenarios/${id}`)).json();
+  const patch = await a.patch(`/api/workspaces/${workspaceId}/scenarios/${id}/draft`, {
+    data: {
+      revision: detail.draft.revision,
+      patch: [{ path: 'tools.enabled', value: TOOL_IDS.map((toolId) => ({ toolId, enabled: true, config: {}, usageHint: '' })) }],
+    },
+  });
+  if (!patch.ok()) throw new Error(`draft patch failed: ${await patch.text()}`);
+  const pub = await a.post(`/api/workspaces/${workspaceId}/scenarios/${id}/publish`, { data: {} });
+  if (!pub.ok()) throw new Error(`publish failed: ${await pub.text()}`);
+  return id;
+}
+
+/** Create a participant session via the member self-run endpoint (workstream B). */
+export async function createSession(scenarioOverride?: string): Promise<{ sessionId: string; sessionToken: string; workspaceId: string }> {
+  const a = await apiClient();
+  const ctx = await scenarioContext();
+  const workspaceId = ctx.workspaceId;
+  const scenarioId = scenarioOverride ?? ctx.scenarioId;
   const res = await a.post(`/api/workspaces/${workspaceId}/scenarios/${scenarioId}/sessions`, { data: {} });
   if (!res.ok()) throw new Error(`create session failed: ${res.status()} ${await res.text()}`);
   return { ...(await res.json()), workspaceId };

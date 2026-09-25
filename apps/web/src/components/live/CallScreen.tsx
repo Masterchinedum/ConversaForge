@@ -43,6 +43,8 @@ export function CallScreen({
   const [typed, setTyped] = useState('');
   const [now, setNow] = useState(Date.now());
   const endedRef = useRef(false);
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (endTimer.current && clearTimeout(endTimer.current)), []);
   const rows = useMemo(() => transcriptRows(state), [state]);
   const tools = useMemo(() => state.toolOrder.map((id) => state.tools[id]!).filter(Boolean), [state.toolOrder, state.tools]);
   const sState = state.state;
@@ -69,7 +71,8 @@ export function CallScreen({
     if (!terminal && !fatal) return;
     endedRef.current = true;
     const delay = call.agentSpeaking ? 1500 : 400;
-    const t = setTimeout(
+    // Not cleared on re-render (end + state messages arrive back to back); only on unmount.
+    endTimer.current = setTimeout(
       () =>
         onEnded({
           state: sState,
@@ -80,7 +83,6 @@ export function CallScreen({
         }),
       delay,
     );
-    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sState, state.end, state.fatal]);
 

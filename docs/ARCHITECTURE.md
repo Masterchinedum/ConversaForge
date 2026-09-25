@@ -142,7 +142,7 @@ B emits `DomainEvents`: `session.started`, `session.terminal` (with final state)
 `ScenariosService.getRunnableVersion(workspaceId, scenarioId, versionId?)` → `{ scenario, version, config: ScenarioConfig }` (throws if unpublished/archived).
 
 ### D (analysis)
-Listens to `session.terminal` → enqueues pipeline (`QUEUES.pipeline`, jobId `pipeline_<sessionId>_<kind>`). Emits `session.analyzed`, `session.extracted`, `session.failed` (on pipeline failure). Exposes `AnalysisService.reprocess(sessionId)`.
+Listens to `session.terminal` → enqueues pipeline (`QUEUES.pipeline`, jobId `pipeline_<sessionId>_<step>_g<generation>`). Emits `session.analyzed`, `session.extracted`, `session.failed` (on pipeline failure). Exposes `AnalysisService.reprocess(sessionId)`.
 
 ### G → B: knowledge
 `KnowledgeService.search(workspaceId, documentIds, query, topK)` → `[{ chunkId, documentId, documentTitle, page, heading, text, score }]` (workspace-scoped).

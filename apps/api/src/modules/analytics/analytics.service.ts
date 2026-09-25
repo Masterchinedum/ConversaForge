@@ -224,6 +224,18 @@ export class AnalyticsService {
       costMicros = n(cost[0]?.cost);
     }
 
+    // Filter options for the UI: org scope lists every scenario/team; own scope only the learner's scenarios.
+    const [scenarioOptions, teamOptions] = await Promise.all([
+      f.ownUserId
+        ? this.prisma.$queryRaw<Array<{ id: string; name: string }>>`
+            SELECT DISTINCT sc.id, sc.name FROM "Session" s
+            JOIN "Scenario" sc ON sc.id = s."scenarioId" AND sc."workspaceId" = ${workspaceId}
+            JOIN "Participant" op ON op.id = s."participantId" AND op."userId" = ${f.ownUserId}
+            WHERE s."workspaceId" = ${workspaceId} AND s."deletedAt" IS NULL ORDER BY sc.name LIMIT 500`
+        : this.prisma.scenario.findMany({ where: { workspaceId, deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
+      f.ownUserId ? Promise.resolve([]) : this.prisma.team.findMany({ where: { workspaceId }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
+    ]);
+
     const k = kpiRows[0] ?? {};
     const total = n(k.total);
     const ended = n(k.ended);
@@ -254,6 +266,7 @@ export class AnalyticsService {
       scope: f.ownUserId ? ('own' as const) : ('workspace' as const),
       range: { from: f.from.toISOString(), to: f.to.toISOString() },
       filters: { scenarioId: f.scenarioId, teamId: f.teamId, channel: f.channel, participantId: f.participantId },
+      options: { scenarios: scenarioOptions, teams: teamOptions },
       kpis: {
         sessions: total,
         completed,
