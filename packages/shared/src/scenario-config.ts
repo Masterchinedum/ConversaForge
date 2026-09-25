@@ -504,6 +504,8 @@ export function templatedFields(c: ScenarioConfig): Array<[string, string]> {
   const out: Array<[string, string]> = [
     ['basics.participantInstructions', c.basics.participantInstructions],
     ['instructions.aiInstructions', c.instructions.aiInstructions],
+    ['persona.role', c.persona.role],
+    ['persona.name', c.persona.name],
     ['persona.description', c.persona.description],
     ['conversation.firstTurn.text', c.conversation.firstTurn.text],
     ['conversation.ending.closingMessage', c.conversation.ending.closingMessage],

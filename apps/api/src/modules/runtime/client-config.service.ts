@@ -29,8 +29,8 @@ export class ClientConfigService {
       language: config.basics.language,
       voice: { provider: pi.tts ?? config.persona.voice.provider, voiceId: config.persona.voice.voiceId, speed: config.persona.voice.speed },
       persona: {
-        name: config.persona.name,
-        role: config.persona.role,
+        name: substituteVariables(config.persona.name, variables),
+        role: substituteVariables(config.persona.role, variables),
         avatar: {
           kind: config.persona.avatar.kind,
           ...(config.persona.avatar.imageUrl ? { imageUrl: config.persona.avatar.imageUrl } : {}),

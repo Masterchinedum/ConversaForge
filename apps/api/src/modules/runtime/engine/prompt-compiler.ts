@@ -94,8 +94,8 @@ export function compileStablePrompt(input: StablePromptInput): string {
   lines.push('<scenario>');
   lines.push(`<scenario_type>${escapeData(c.basics.type)}</scenario_type>`);
   lines.push('<persona>');
-  if (c.persona.name) lines.push(`Name: ${escapeData(c.persona.name)}`);
-  lines.push(`Role you play: ${escapeData(c.persona.role || 'a helpful conversation partner')}`);
+  if (c.persona.name) lines.push(`Name: ${escapeData(sub(c.persona.name))}`);
+  lines.push(`Role you play: ${escapeData(sub(c.persona.role) || 'a helpful conversation partner')}`);
   if (c.persona.description) lines.push(`Description:\n${escapeData(sub(c.persona.description))}`);
   lines.push('</persona>');
   if (c.instructions.goals.length) {
