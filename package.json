@@ -1,0 +1,17 @@
+{
+  "name": "conversaforge",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "pnpm -r --filter @cf/shared build && pnpm -r --filter @cf/api build && pnpm -r --filter @cf/web build",
+    "build:shared": "pnpm --filter @cf/shared build",
+    "dev:api": "pnpm --filter @cf/api dev",
+    "dev:web": "pnpm --filter @cf/web dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @cf/api prisma:migrate",
+    "db:seed": "pnpm --filter @cf/api seed"
+  }
+}

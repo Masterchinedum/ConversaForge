@@ -1,0 +1,1162 @@
+// ConversaForge domain model.
+// Conventions: cuid ids, createdAt/updatedAt on mutable rows, every tenant-owned row carries workspaceId,
+// soft-deletes via deletedAt where user-facing deletion must be auditable.
+// ScenarioVersion rows are immutable (enforced in service code AND by a DB trigger in the initial migration).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Identity & workspaces ─────────────────────────────
+
+enum WorkspaceKind {
+  PERSONAL
+  ORGANIZATION
+}
+
+enum Role {
+  OWNER // full control incl. billing & deletion
+  ADMIN // members, access, usage, settings
+  CREATOR // author scenarios/courses/knowledge
+  REVIEWER // view sessions, reports, analytics
+  MEMBER // learner/participant inside the org
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  passwordHash    String?
+  emailVerifiedAt DateTime?
+  avatarUrl       String?
+  isSuperAdmin    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  authSessions AuthSession[]
+  memberships  Membership[]
+  participants Participant[]
+}
+
+model AuthSession {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Workspace {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  kind        WorkspaceKind @default(ORGANIZATION)
+  // settings: { maxSessionMinutes, defaultRetentionDays, allowPublicScenarios, requireConsent, ... }
+  settings    Json          @default("{}")
+  createdById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  memberships Membership[]
+  invitations Invitation[]
+  branding    WorkspaceBranding?
+  scenarios   Scenario[]
+  sessions    Session[]
+  teams       Team[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role      @default(MEMBER)
+  invitedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  email       String
+  role        Role      @default(MEMBER)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  acceptedById String?
+  revokedAt   DateTime?
+  invitedById String?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, email])
+}
+
+model Team {
+  id          String       @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members     TeamMember[]
+
+  @@unique([workspaceId, name])
+}
+
+model TeamMember {
+  id            String   @id @default(cuid())
+  teamId        String
+  participantId String
+  createdAt     DateTime @default(now())
+  team          Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, participantId])
+  @@index([participantId])
+}
+
+model WorkspaceBranding {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  displayName  String?
+  logoAssetId  String?
+  logoUrl      String?
+  primaryColor String?
+  accentColor  String?
+  supportEmail String?
+  emailFooter  String?
+  hidePoweredBy Boolean  @default(false)
+  updatedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  actorUserId String?
+  actorApiKeyId String?
+  action      String // e.g. "member.role_changed", "scenario.published"
+  targetType  String?
+  targetId    String?
+  metadata    Json     @default("{}")
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([targetType, targetId])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  prefix      String    @unique // first chars shown in UI, e.g. "cf_live_ab12cd"
+  keyHash     String    @unique
+  scopes      String[]
+  createdById String?
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  scope          String // workspaceId or "public"
+  key            String
+  method         String
+  path           String
+  requestHash    String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([scope, key])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  type        String
+  title       String
+  body        String?
+  link        String?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+// ───────────────────────────── Usage, quotas & billing ─────────────────────────────
+
+enum UsageKind {
+  SESSION_SECONDS
+  LLM_INPUT_TOKENS
+  LLM_OUTPUT_TOKENS
+  STT_SECONDS
+  TTS_CHARACTERS
+  REALTIME_SECONDS
+  ANALYSIS_INPUT_TOKENS
+  ANALYSIS_OUTPUT_TOKENS
+  STORAGE_BYTES
+  TELEPHONY_SECONDS
+  EMBEDDING_TOKENS
+}
+
+model UsageLedger {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  sessionId      String?
+  kind           UsageKind
+  provider       String
+  quantity       Float
+  unit           String
+  costMicros     BigInt    @default(0) // USD * 1e6, estimated from the price table
+  idempotencyKey String    @unique
+  metadata       Json      @default("{}")
+  createdAt      DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([sessionId])
+}
+
+model WorkspaceQuota {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  // "session_minutes" | "cost_micros" | "sessions" | "storage_bytes" | "telephony_minutes"
+  metric            String
+  period            String    @default("month")
+  limitValue        Float
+  alertThresholdPct Int       @default(80)
+  hardLimit         Boolean   @default(true)
+  updatedById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([workspaceId, metric, period])
+}
+
+model UsageAlert {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  metric         String
+  periodKey      String // e.g. "2026-09"
+  thresholdPct   Int
+  valueAtTrigger Float
+  acknowledgedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@unique([workspaceId, metric, periodKey, thresholdPct])
+}
+
+model BillingAccount {
+  id                 String   @id @default(cuid())
+  workspaceId        String   @unique
+  provider           String   @default("none") // adapter id: "none" | "stripe" | ...
+  externalCustomerId String?
+  plan               String   @default("free")
+  status             String   @default("active")
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// ───────────────────────────── Scenarios ─────────────────────────────
+
+enum Privacy {
+  PRIVATE // only explicit grants / links / workspace creators+reviewers
+  ORGANIZATION // any workspace member
+  PUBLIC // anyone (gallery + public run page, rate-limited)
+}
+
+enum ScenarioStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Scenario {
+  id                 String         @id @default(cuid())
+  workspaceId        String
+  slug               String
+  name               String
+  type               String // interview | coaching | sales_practice | negotiation | leadership | demo | support | custom
+  privacy            Privacy        @default(PRIVATE)
+  status             ScenarioStatus @default(DRAFT)
+  isTemplate         Boolean        @default(false)
+  galleryListed      Boolean        @default(false)
+  tags               String[]
+  publicDescription  String?
+  latestVersionId    String?
+  latestVersionNumber Int           @default(0)
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  archivedAt         DateTime?
+  deletedAt          DateTime?
+
+  workspace Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft     ScenarioDraft?
+  versions  ScenarioVersion[]
+  grants    ScenarioGrant[]
+  links     ShareLink[]
+  sessions  Session[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status])
+  @@index([privacy, galleryListed])
+}
+
+model ScenarioDraft {
+  id            String   @id @default(cuid())
+  scenarioId    String   @unique
+  config        Json // ScenarioConfig (may be incomplete / invalid while editing)
+  lockedFields  String[] // JSON-pointer-ish paths the drafting assistant must not touch
+  baseVersionId String?
+  revision      Int      @default(1) // optimistic concurrency
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  scenario      Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
+
+model ScenarioVersion {
+  id                     String    @id @default(cuid())
+  scenarioId             String
+  workspaceId            String
+  version                Int
+  config                 Json // normalized, validated ScenarioConfig — IMMUTABLE
+  configHash             String
+  schemaVersion          Int       @default(1)
+  changeNote             String?
+  rolledBackFromVersionId String?
+  publishedById          String?
+  publishedAt            DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+  scenario               Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  sessions               Session[]
+
+  @@unique([scenarioId, version])
+  @@index([workspaceId])
+}
+
+model DraftAssistantProposal {
+  id            String    @id @default(cuid())
+  scenarioId    String
+  workspaceId   String
+  draftRevision Int
+  instruction   String
+  // [{ path, before, after, reason }]
+  changes       Json
+  status        String    @default("PENDING") // PENDING | APPLIED | PARTIAL | REJECTED | STALE
+  appliedPaths  String[]
+  provider      String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@index([scenarioId, createdAt])
+}
+
+enum GranteeType {
+  USER
+  EMAIL
+  WORKSPACE
+}
+
+enum GrantPermission {
+  RUN
+  VIEW_RESULTS
+  EDIT
+}
+
+model ScenarioGrant {
+  id                 String          @id @default(cuid())
+  scenarioId         String
+  workspaceId        String
+  granteeType        GranteeType
+  granteeUserId      String?
+  granteeEmail       String?
+  granteeWorkspaceId String?
+  permission         GrantPermission @default(RUN)
+  expiresAt          DateTime?
+  revokedAt          DateTime?
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  scenario           Scenario        @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@index([granteeEmail])
+  @@index([granteeUserId])
+}
+
+enum LinkMode {
+  MULTI_USE
+  ONE_TIME
+}
+
+enum IdentityMode {
+  NONE
+  NAME
+  EMAIL
+  NAME_EMAIL
+}
+
+model ShareLink {
+  id                   String       @id @default(cuid())
+  scenarioId           String
+  workspaceId          String
+  token                String       @unique // 32+ bytes of randomness, base64url
+  label                String?
+  pinnedVersionId      String? // null = latest published version at session start
+  mode                 LinkMode     @default(MULTI_USE)
+  maxUses              Int?
+  useCount             Int          @default(0)
+  expiresAt            DateTime?
+  passcodeHash         String?
+  perEmailAttemptLimit Int?
+  identityMode         IdentityMode @default(NAME_EMAIL)
+  allowedEmailDomains  String[]
+  prefilledVariables   Json         @default("{}")
+  courseId             String?
+  revokedAt            DateTime?
+  createdById          String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  scenario             Scenario     @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+}
+
+enum AccessTokenPurpose {
+  EMBED // server-minted private token for the embeddable widget
+  PARTICIPANT // personal invite to run a scenario
+}
+
+model AccessToken {
+  id                    String             @id @default(cuid())
+  workspaceId           String
+  scenarioId            String?
+  pinnedVersionId       String?
+  purpose               AccessTokenPurpose @default(EMBED)
+  tokenHash             String             @unique
+  prefix                String
+  participantExternalId String?
+  participantEmail      String?
+  participantName       String?
+  variables             Json               @default("{}")
+  metadata              Json               @default("{}")
+  allowedOrigins        String[]
+  maxUses               Int?
+  useCount              Int                @default(0)
+  expiresAt             DateTime
+  revokedAt             DateTime?
+  createdById           String?
+  createdByApiKeyId     String?
+  createdAt             DateTime           @default(now())
+
+  @@index([workspaceId])
+}
+
+// ───────────────────────────── Participants & sessions ─────────────────────────────
+
+model Participant {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String?
+  email       String?
+  name        String?
+  externalId  String?
+  metadata    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessions    Session[]
+
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId, email])
+  @@index([workspaceId, userId])
+}
+
+enum Channel {
+  BROWSER
+  EMBED
+  PHONE_INBOUND
+  PHONE_OUTBOUND
+  MEETING
+  API
+}
+
+enum SessionState {
+  CREATED
+  READY
+  CONNECTING
+  ACTIVE
+  PAUSED
+  RECONNECTING
+  ENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
+  ABANDONED
+}
+
+enum ProcessingStatus {
+  NOT_STARTED
+  QUEUED
+  PROCESSING
+  COMPLETED
+  PARTIAL
+  FAILED
+  SKIPPED
+}
+
+model Session {
+  id                String           @id @default(cuid())
+  workspaceId       String
+  scenarioId        String
+  scenarioVersionId String
+  participantId     String
+  channel           Channel          @default(BROWSER)
+  state             SessionState     @default(CREATED)
+  stateReason       String?
+  endedBy           String? // participant | agent | timer | system | admin
+  shareLinkId       String?
+  accessTokenId     String?
+  enrollmentId      String?
+  courseItemAttemptId String?
+  coachMode         Boolean          @default(false)
+  variables         Json             @default("{}") // allowlisted, sanitized runtime variables
+  metadata          Json             @default("{}")
+  consent           Json             @default("{}") // { recordAudio, recordVideo, analysis, acceptedAt, noticeVersion }
+  providerInfo      Json             @default("{}") // { voiceMode, llm, stt, tts, simulated }
+  runtimeState      Json             @default("{}") // { coveredTopics, phase, warningsSent, ... }
+  resumeTokenHash   String?
+  resumeExpiresAt   DateTime?
+  maxDurationSec    Int              @default(1800)
+  startedAt         DateTime?
+  endedAt           DateTime?
+  durationMs        Int?
+  lastSeq           Int              @default(0)
+  errorCode         String?
+  errorMessage      String?
+  analysisStatus    ProcessingStatus @default(NOT_STARTED)
+  analysisError     String?
+  usageFinalizedAt  DateTime?
+  externalRef       String? // e.g. telephony call sid, meeting bot id
+  retentionUntil    DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scenario        Scenario          @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenarioVersion ScenarioVersion   @relation(fields: [scenarioVersionId], references: [id], onDelete: Restrict)
+  participant     Participant       @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  turns           TranscriptTurn[]
+  events          SessionEvent[]
+  toolEvents      ToolEvent[]
+  evaluations     Evaluation[]
+  extractions     ExtractionResult[]
+  media           MediaAsset[]
+
+  @@index([workspaceId, createdAt])
+  @@index([scenarioId, createdAt])
+  @@index([participantId])
+  @@index([state])
+  @@index([shareLinkId])
+}
+
+model SessionEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  type      String // state.changed | provider.* | tool.* | client.* | error
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+enum Speaker {
+  AGENT
+  PARTICIPANT
+  SYSTEM
+}
+
+model TranscriptTurn {
+  id           String   @id @default(cuid())
+  sessionId    String
+  seq          Int
+  speaker      Speaker
+  text         String
+  clientTurnId String? // dedupe key from the client/provider (e.g. realtime item id)
+  startedAtMs  Int? // offset from session start
+  endedAtMs    Int?
+  interrupted  Boolean  @default(false)
+  confidence   Float?
+  source       String? // browser_stt | server_stt | realtime | llm | typed | system
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now())
+  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@unique([sessionId, clientTurnId])
+}
+
+enum MediaKind {
+  RECORDING_AUDIO
+  RECORDING_VIDEO
+  KNOWLEDGE_DOCUMENT
+  TOOL_UPLOAD
+  BRANDING
+  COURSE_ASSET
+  EXPORT
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+model MediaAsset {
+  id          String      @id @default(cuid())
+  workspaceId String
+  sessionId   String?
+  kind        MediaKind
+  storageKey  String      @unique
+  fileName    String?
+  mimeType    String
+  sizeBytes   BigInt      @default(0)
+  sha256      String?
+  status      MediaStatus @default(UPLOADING)
+  durationMs  Int?
+  metadata    Json        @default("{}")
+  createdById String?
+  retentionUntil DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+  session     Session?    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parts       MediaUploadPart[]
+
+  @@index([workspaceId, kind])
+  @@index([sessionId])
+}
+
+model MediaUploadPart {
+  id         String     @id @default(cuid())
+  assetId    String
+  partNumber Int
+  storageKey String
+  sizeBytes  Int
+  createdAt  DateTime   @default(now())
+  asset      MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, partNumber])
+}
+
+model ToolEvent {
+  id         String   @id @default(cuid())
+  sessionId  String
+  toolId     String
+  toolCallId String
+  kind       String // INVOKED | PRESENTED | RESULT | ERROR | DENIED
+  actor      String // AGENT | PARTICIPANT | SYSTEM
+  args       Json     @default("{}")
+  result     Json?
+  createdAt  DateTime @default(now())
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, toolCallId, kind])
+  @@index([sessionId, createdAt])
+}
+
+// ───────────────────────────── Post-session analysis ─────────────────────────────
+
+model ProcessingJob {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  sessionId      String?
+  kind           String // finalize_transcript | score | extract | report | analytics | notify | knowledge_ingest | webhook
+  idempotencyKey String           @unique
+  status         ProcessingStatus @default(QUEUED)
+  attempts       Int              @default(0)
+  lastError      String?
+  result         Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  @@index([sessionId])
+  @@index([workspaceId, status])
+}
+
+model Evaluation {
+  id                   String           @id @default(cuid())
+  sessionId            String
+  workspaceId          String
+  scenarioVersionId    String
+  rubricHash           String
+  status               ProcessingStatus @default(QUEUED)
+  overallScore         Float? // computed in code from criterion scores & weights
+  scoredWeightPct      Float? // share of total weight that had enough evidence
+  insufficientEvidence Boolean          @default(false)
+  summary              String?
+  strengths            Json             @default("[]")
+  weaknesses           Json             @default("[]")
+  improvements         Json             @default("[]")
+  notes                Json             @default("[]") // [{ text, turnSeqs: [] }]
+  provider             String?
+  model                String?
+  promptVersion        String?
+  simulated            Boolean          @default(false)
+  isCurrent            Boolean          @default(true)
+  humanReviewRequired  Boolean          @default(false)
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewNote           String?
+  error                String?
+  createdAt            DateTime         @default(now())
+  completedAt          DateTime?
+  session              Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  criteria             CriterionScore[]
+
+  @@index([sessionId])
+  @@index([workspaceId, createdAt])
+}
+
+model CriterionScore {
+  id                   String     @id @default(cuid())
+  evaluationId         String
+  criterionId          String
+  name                 String
+  weight               Float
+  score                Float? // 0..100, null when insufficient evidence
+  insufficientEvidence Boolean    @default(false)
+  confidence           Float?
+  rationale            String?
+  evidence             Json       @default("[]") // [{ turnSeq, quote }]
+  createdAt            DateTime   @default(now())
+  evaluation           Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, criterionId])
+}
+
+model ExtractionResult {
+  id                String   @id @default(cuid())
+  sessionId         String
+  workspaceId       String
+  scenarioVersionId String
+  key               String
+  type              String // text | number | boolean | list | date
+  value             Json?
+  valid             Boolean  @default(true)
+  errors            String[]
+  evidence          Json     @default("[]")
+  confidence        Float?
+  simulated         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  session           Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, key])
+}
+
+model SessionReport {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique
+  workspaceId String
+  content     Json
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────────── Coaching & memory ─────────────────────────────
+
+model CoachProfile {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  participantId String
+  memoryEnabled Boolean  @default(true)
+  goals         String?
+  summary       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  facts         MemoryFact[]
+
+  @@unique([workspaceId, participantId])
+}
+
+model MemoryFact {
+  id              String       @id @default(cuid())
+  workspaceId     String
+  participantId   String
+  coachProfileId  String
+  scenarioId      String?
+  sourceSessionId String?
+  category        String       @default("general") // goal | strength | weakness | preference | context | progress
+  content         String
+  confidence      Float?
+  disabled        Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  coachProfile    CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, participantId])
+}
+
+// ───────────────────────────── Courses ─────────────────────────────
+
+enum CourseItemKind {
+  SCENARIO
+  VIDEO
+  DOCUMENT
+  LINK
+}
+
+model Course {
+  id          String         @id @default(cuid())
+  workspaceId String
+  title       String
+  description String?
+  coverUrl    String?
+  coverAssetId String?
+  forcedOrder Boolean        @default(false)
+  visibility  Privacy        @default(PRIVATE)
+  status      ScenarioStatus @default(DRAFT)
+  shareToken  String?        @unique
+  createdById String?
+  updatedById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+  items       CourseItem[]
+  enrollments Enrollment[]
+
+  @@index([workspaceId])
+}
+
+model CourseItem {
+  id              String         @id @default(cuid())
+  courseId        String
+  position        Int
+  kind            CourseItemKind
+  title           String
+  description     String?
+  scenarioId      String?
+  pinnedVersionId String?
+  url             String?
+  assetId         String?
+  // { type: "session_completed" } | { type: "min_score", minScore } | { type: "viewed" } | { type: "manual" }
+  completionRule  Json           @default("{}")
+  required        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  course          Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  attempts        CourseItemAttempt[]
+
+  @@index([courseId, position])
+}
+
+model Enrollment {
+  id            String    @id @default(cuid())
+  courseId      String
+  workspaceId   String
+  participantId String
+  userId        String?
+  status        String    @default("ACTIVE") // ACTIVE | COMPLETED | DROPPED
+  generation    Int       @default(1) // incremented by "Start over"; progress counts only current generation
+  assignedById  String?
+  lastItemId    String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  course        Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  attempts      CourseItemAttempt[]
+
+  @@unique([courseId, participantId])
+  @@index([workspaceId])
+}
+
+model CourseItemAttempt {
+  id           String     @id @default(cuid())
+  enrollmentId String
+  courseItemId String
+  generation   Int
+  status       String     @default("STARTED") // STARTED | COMPLETED | FAILED
+  sessionId    String?    @unique
+  score        Float?
+  startedAt    DateTime   @default(now())
+  completedAt  DateTime?
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  courseItem   CourseItem @relation(fields: [courseItemId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, courseItemId, generation])
+}
+
+// ───────────────────────────── Knowledge ─────────────────────────────
+
+model KnowledgeDocument {
+  id          String           @id @default(cuid())
+  workspaceId String
+  title       String
+  assetId     String?
+  sourceUrl   String?
+  mimeType    String
+  status      ProcessingStatus @default(QUEUED)
+  error       String?
+  pageCount   Int?
+  chunkCount  Int              @default(0)
+  charCount   Int              @default(0)
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  chunks      KnowledgeChunk[]
+
+  @@index([workspaceId])
+}
+
+model KnowledgeChunk {
+  id          String                   @id @default(cuid())
+  documentId  String
+  workspaceId String
+  ordinal     Int
+  text        String
+  page        Int?
+  heading     String?
+  tokenCount  Int                      @default(0)
+  // Generated column (see migration): to_tsvector('english', coalesce(heading,'') || ' ' || text)
+  tsv         Unsupported("tsvector")?
+  createdAt   DateTime                 @default(now())
+  document    KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, ordinal])
+  @@index([workspaceId])
+}
+
+// ───────────────────────────── Integrations ─────────────────────────────
+
+model ProviderConnection {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  provider        String // anthropic | openai | deepgram | elevenlabs | twilio | recall | google_calendar | ...
+  kind            String // LLM | STT | TTS | REALTIME | TELEPHONY | MEETING | CALENDAR
+  label           String?
+  encryptedSecret String // AES-256-GCM, see CryptoService
+  secretLast4     String?
+  config          Json      @default("{}")
+  status          String    @default("ACTIVE") // ACTIVE | INVALID | REVOKED
+  lastVerifiedAt  DateTime?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  revokedAt       DateTime?
+
+  @@index([workspaceId, kind])
+}
+
+model CustomFunction {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  name             String // snake_case, exposed to the model
+  description      String
+  parametersSchema Json // JSON Schema (object) — validated before execution
+  url              String // HTTPS only; host must be in allowedHosts
+  method           String    @default("POST")
+  encryptedHeaders String? // AES-256-GCM JSON of headers (e.g. auth)
+  allowedHosts     String[]
+  timeoutMs        Int       @default(8000)
+  enabled          Boolean   @default(true)
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  @@unique([workspaceId, name])
+}
+
+model OutboxEvent {
+  id          String   @id @default(cuid()) // doubles as the public event id
+  workspaceId String
+  type        String // session.started | session.completed | session.analyzed | session.extracted | session.failed
+  payload     Json
+  createdAt   DateTime @default(now())
+  dispatchedAt DateTime?
+
+  @@index([workspaceId, createdAt])
+}
+
+model WebhookSubscription {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  url             String
+  description     String?
+  encryptedSecret String
+  events          String[]
+  active          Boolean   @default(true)
+  failureCount    Int       @default(0)
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  disabledAt      DateTime?
+  deliveries      WebhookDelivery[]
+
+  @@index([workspaceId])
+}
+
+model WebhookDelivery {
+  id             String              @id @default(cuid())
+  subscriptionId String
+  workspaceId    String
+  eventId        String
+  eventType      String
+  payload        Json
+  status         String              @default("PENDING") // PENDING | SUCCEEDED | RETRYING | FAILED
+  attempts       Int                 @default(0)
+  lastStatusCode Int?
+  lastError      String?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, eventId])
+  @@index([workspaceId, createdAt])
+}
+
+// ───────────────────────────── Channels (phone / meetings) ─────────────────────────────
+
+model PhoneNumber {
+  id                   String   @id @default(cuid())
+  workspaceId          String
+  providerConnectionId String?
+  provider             String // twilio | ...
+  e164                 String
+  inboundScenarioId    String?
+  label                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([provider, e164])
+  @@index([workspaceId])
+}
+
+model OutboundCallBatch {
+  id          String   @id @default(cuid())
+  workspaceId String
+  scenarioId  String
+  name        String
+  fromNumberId String?
+  scheduledAt DateTime?
+  status      String   @default("DRAFT") // DRAFT | SCHEDULED | RUNNING | COMPLETED | CANCELLED | BLOCKED
+  concurrency Int      @default(1)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  targets     OutboundCallTarget[]
+
+  @@index([workspaceId])
+}
+
+model OutboundCallTarget {
+  id          String            @id @default(cuid())
+  batchId     String
+  phone       String
+  name        String?
+  email       String?
+  variables   Json              @default("{}")
+  status      String            @default("PENDING") // PENDING | DIALING | IN_PROGRESS | COMPLETED | FAILED | NO_ANSWER | SKIPPED
+  sessionId   String?
+  attempts    Int               @default(0)
+  lastError   String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  batch       OutboundCallBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, status])
+}
+
+model MeetingBot {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  scenarioId      String
+  provider        String // recall | ...
+  meetingUrl      String
+  scheduledAt     DateTime?
+  calendarEventId String?
+  status          String    @default("SCHEDULED") // SCHEDULED | JOINING | IN_CALL | COMPLETED | FAILED | CANCELLED | BLOCKED
+  providerBotId   String?
+  sessionId       String?
+  lastError       String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([workspaceId])
+}
+
+// ───────────────────────────── Privacy requests ─────────────────────────────
+
+model DataRequest {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  type          String // EXPORT | DELETE
+  participantId String?
+  subjectEmail  String?
+  status        String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  resultAssetId String?
+  requestedById String?
+  error         String?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([workspaceId])
+}
