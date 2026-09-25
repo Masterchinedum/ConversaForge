@@ -74,6 +74,9 @@ test('full session: intro → consent → devices → typed turns → reconnect 
   await typeTurn(page, 'Last year I led the migration of our billing system to event sourcing, which cut incidents by half.');
 
   // ── Reconnect: drop the socket, send a final while disconnected (queued), verify it is delivered once.
+  // The drop hook only exists in non-production builds (window.__cfLive); run this spec against `next dev`.
+  const hooks = await page.evaluate(() => !!(window as any).__cfLive);
+  test.skip(!hooks, 'Reconnect/refresh steps need the dev-only window.__cfLive hook (run against next dev)');
   await page.evaluate(() => (window as any).__cfLive.drop());
   await expect(page.getByTestId('call-status')).toHaveText(/Reconnecting|Connecting/);
   const queuedText = 'This answer was sent while the connection was down.';

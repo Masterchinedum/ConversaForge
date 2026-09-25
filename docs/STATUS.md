@@ -19,7 +19,7 @@ This document separates what is **complete and verified**, what is **implemented
 | API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 355/355 (26 suites) |
 | Type checks (`pnpm -r typecheck`) | ✅ clean |
 | Web production build (`pnpm --filter @cf/web build`) | ✅ 47 routes |
-| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md) |
+| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 14/14 journey tests passed against a **production build** (`next build` + `next start`, CSP on) with a freshly migrated + seeded DB: 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md) |
 | Security review | ✅ 2 high / 5 medium / 6 low findings fixed. See [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) |
 | Dependency audit (`pnpm audit --prod`) | ✅ no known vulnerabilities |
 | Migrations from empty DB (`prisma migrate deploy`) + no drift vs schema | ✅ |
