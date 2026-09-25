@@ -98,9 +98,10 @@ export class Harness {
     return randomBytes(5).toString('hex');
   }
 
-  async user(name = 'User', email?: string) {
+  /** A user with a bearer session. Verified email by default (pass `{ verified: false }` for a fresh signup). */
+  async user(name = 'User', email?: string, opts: { verified?: boolean } = {}) {
     const e = (email ?? `${name.toLowerCase().replace(/\W/g, '')}-${this.uid()}@test.example`).toLowerCase();
-    const user = await this.prisma.user.create({ data: { email: e, name } });
+    const user = await this.prisma.user.create({ data: { email: e, name, emailVerifiedAt: opts.verified === false ? null : new Date() } });
     const token = this.crypto.randomToken(32);
     await this.prisma.authSession.create({ data: { userId: user.id, tokenHash: this.crypto.sha256(token), expiresAt: new Date(Date.now() + 86400_000) } });
     return { ...user, token };

@@ -71,6 +71,7 @@ export class AuthGuard implements CanActivate {
       name: s.user.name,
       authSessionId: s.id,
       isSuperAdmin: s.user.isSuperAdmin,
+      emailVerified: !!s.user.emailVerifiedAt,
     };
   }
 

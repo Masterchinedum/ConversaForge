@@ -40,7 +40,8 @@ export class AuthController {
     await this.rateLimit.enforce(`signup:${req.ip}`, 10, 3600);
     const s = await this.auth.signup(body, { ip: req.ip, userAgent: req.headers['user-agent'] });
     this.setCookie(reply, s.token, s.expiresAt);
-    return { ok: true, token: s.token };
+    // The token lives only in the httpOnly cookie (never in the body, so scripts can't read it).
+    return { ok: true };
   }
 
   @Public()
@@ -51,7 +52,8 @@ export class AuthController {
     await this.rateLimit.enforce(`login:email:${body.email.toLowerCase()}`, 10, 900, 'Too many login attempts. Try again later.');
     const s = await this.auth.login(body, { ip: req.ip, userAgent: req.headers['user-agent'] });
     this.setCookie(reply, s.token, s.expiresAt);
-    return { ok: true, token: s.token };
+    // The token lives only in the httpOnly cookie (never in the body, so scripts can't read it).
+    return { ok: true };
   }
 
   @Post('logout')
@@ -80,6 +82,21 @@ export class AuthController {
   ) {
     await this.auth.changePassword(user.userId, body.currentPassword, body.newPassword, user.authSessionId);
     return { ok: true };
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(200)
+  async verifyEmail(@Body(new ZodPipe(z.object({ token: z.string().min(10).max(2000) }))) body: { token: string }, @Req() req: FastifyRequest) {
+    await this.rateLimit.enforce(`verify-email:ip:${req.ip}`, 30, 3600);
+    return this.auth.verifyEmail(body.token);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(200)
+  async resendVerification(@CurrentUser() user: UserPrincipal) {
+    await this.rateLimit.enforce(`verify-email:resend:${user.userId}`, 5, 3600, 'Too many verification emails requested. Try again later.');
+    return this.auth.sendVerification(user.userId);
   }
 
   @Public()

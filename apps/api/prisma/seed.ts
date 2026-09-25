@@ -37,8 +37,10 @@ async function main() {
     const user = await prisma.user.upsert({
       where: { email: u.email },
       update: {},
-      create: { email: u.email, name: u.name, passwordHash },
+      // Demo accounts are pre-verified (email grants / email-assigned enrollments require a verified address).
+      create: { email: u.email, name: u.name, passwordHash, emailVerifiedAt: new Date() },
     });
+    if (!user.emailVerifiedAt) await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
     users.push({ ...u, id: user.id });
     const personalSlug = `${u.email.split('@')[0]}-personal`;
     const hasPersonal = await prisma.membership.findFirst({ where: { userId: user.id, workspace: { kind: 'PERSONAL' } } });

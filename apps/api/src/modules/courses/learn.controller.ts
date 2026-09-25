@@ -2,7 +2,7 @@ import { Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/com
 import { ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { CurrentUser, CurrentWorkspace, Public } from '../../common/auth/decorators';
-import type { Principal, WorkspaceContext } from '../../common/auth/principal';
+import { verifiedEmail, type Principal, type WorkspaceContext } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
@@ -10,7 +10,8 @@ import { CoursesService } from './courses.service';
 import { LearnService, type LearnAccess, type LearnerRef } from './learn.service';
 
 type UserPrincipal = Extract<Principal, { kind: 'user' }>;
-const learner = (u: UserPrincipal): LearnerRef => ({ userId: u.userId, email: u.email, name: u.name });
+// Only a verified address may claim email-assigned enrollments / unclaimed participant rows.
+const learner = (u: UserPrincipal): LearnerRef => ({ userId: u.userId, email: verifiedEmail(u), name: u.name });
 
 /** Learner endpoints for workspace members (own data only). */
 @ApiTags('learn')

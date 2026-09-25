@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
 # ConversaForge API + worker image. Build from the repo root:
 #   docker build -f infra/docker/api.Dockerfile -t conversaforge-api .
-FROM node:22-bookworm-slim AS base
+# Full bookworm image: ships OpenSSL + CA certificates (needed by Prisma engines) without apt-get.
+FROM node:22-bookworm AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
-RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
 WORKDIR /app
 
 FROM base AS build
@@ -11,11 +12,16 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile --filter @cf/api... --filter @cf/shared
+# Optional extra CA (TLS-intercepting build proxies): docker build --secret id=extra_ca,src=/path/ca.crt …
+RUN --mount=type=secret,id=extra_ca,target=/run/secrets/extra_ca,required=false \
+    if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
+    pnpm install --frozen-lockfile --filter @cf/api... --filter @cf/shared
 COPY packages/shared packages/shared
 COPY apps/api apps/api
 RUN pnpm --filter @cf/shared build && pnpm --filter @cf/api build
-RUN pnpm deploy --filter @cf/api --prod --legacy /out && cp -r apps/api/dist /out/dist && cp -r apps/api/prisma /out/prisma \
+RUN --mount=type=secret,id=extra_ca,target=/run/secrets/extra_ca,required=false \
+    if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
+    pnpm deploy --filter @cf/api --prod --legacy /out && cp -r apps/api/dist /out/dist && cp -r apps/api/prisma /out/prisma \
  && cd /out && npx prisma generate
 
 FROM base AS runtime

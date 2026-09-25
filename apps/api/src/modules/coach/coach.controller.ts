@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Query } from '@nestjs/comm
 import { ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { CurrentPrincipal, CurrentUser, RequireCapability } from '../../common/auth/decorators';
-import type { Principal } from '../../common/auth/principal';
+import { verifiedEmail, type Principal } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';
 import { PaginationQuery, prismaPageArgs, toPage } from '../../common/http/pagination';
 import { ZodPipe } from '../../common/http/zod.pipe';
@@ -52,7 +52,7 @@ export class CoachController {
   @Patch('me')
   async updateMe(@Param('workspaceId') ws: string, @CurrentUser() u: UserPrincipal, @Body(new ZodPipe(ProfileBody)) body: z.infer<typeof ProfileBody>) {
     let ids = await this.myParticipantIds(ws, u.userId);
-    if (!ids.length) ids = [(await participantForUser(this.prisma, ws, { userId: u.userId, email: u.email, name: u.name })).id];
+    if (!ids.length) ids = [(await participantForUser(this.prisma, ws, { userId: u.userId, email: verifiedEmail(u), name: u.name })).id];
     await this.memory.updateProfiles(ws, ids, body);
     return this.me(ws, u);
   }

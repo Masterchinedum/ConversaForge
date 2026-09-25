@@ -11,7 +11,10 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/web/package.json apps/web/
 COPY apps/api/package.json apps/api/
-RUN pnpm install --frozen-lockfile --filter @cf/web... --filter @cf/shared
+# Optional extra CA (TLS-intercepting build proxies): docker build --secret id=extra_ca,src=/path/ca.crt …
+RUN --mount=type=secret,id=extra_ca,target=/run/secrets/extra_ca,required=false \
+    if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
+    pnpm install --frozen-lockfile --filter @cf/web... --filter @cf/shared
 COPY packages/shared packages/shared
 COPY apps/web apps/web
 # Public (browser) URLs are baked in at build time.

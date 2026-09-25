@@ -3,7 +3,7 @@ import type { GrantPermission, Prisma, ScenarioGrant } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';
-import type { Principal } from '../../common/auth/principal';
+import { verifiedEmail, type Principal } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';
 import { PaginationQuery, prismaPageArgs, toPage } from '../../common/http/pagination';
 import { MailService } from '../../common/mail/mail.service';
@@ -199,7 +199,8 @@ export class GrantsService {
           {
             OR: [
               { granteeType: 'USER', granteeUserId: user.userId },
-              { granteeType: 'EMAIL', granteeEmail: user.email.toLowerCase() },
+              // Email grants only apply to a VERIFIED address (anyone can sign up with any email).
+              ...(verifiedEmail(user) ? [{ granteeType: 'EMAIL' as const, granteeEmail: verifiedEmail(user)!.toLowerCase() }] : []),
               ...(memberships.length ? [{ granteeType: 'WORKSPACE' as const, granteeWorkspaceId: { in: memberships.map((m) => m.workspaceId) } }] : []),
             ],
           },
@@ -264,7 +265,7 @@ export class GrantsService {
       workspaceId: g.workspaceId,
       scenarioId,
       channel: 'BROWSER',
-      participant: { userId: user.userId, email: user.email, name: user.name },
+      participant: { userId: user.userId, email: verifiedEmail(user), name: user.name },
       variables,
       metadata: { source: 'grant', grantId: g.id },
     });

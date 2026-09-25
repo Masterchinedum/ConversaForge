@@ -194,8 +194,9 @@ export class EnrollmentsService {
     // Emails (people who may not have an account yet)
     for (const raw of body.emails) {
       const email = normEmail(raw)!;
-      const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true, name: true, deletedAt: true } });
-      const liveUser = user && !user.deletedAt ? user : null;
+      const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true, name: true, deletedAt: true, emailVerifiedAt: true } });
+      // Only an account that verified this address may be bound to an email assignment.
+      const liveUser = user && !user.deletedAt && user.emailVerifiedAt ? user : null;
       const p = await participantForEmail(this.prisma, workspaceId, email, liveUser?.id ?? null);
       const member = liveUser ? !!(await this.prisma.membership.findUnique({ where: { workspaceId_userId: { workspaceId, userId: liveUser.id } } })) : false;
       targets.set(p.id, { participantId: p.id, userId: p.userId ?? liveUser?.id ?? null, email, name: liveUser?.name ?? p.name, member });

@@ -42,7 +42,7 @@ export async function participantForEmail(db: Db, workspaceId: string, emailRaw:
  * Enrollments assigned to the user's email before they had an account (or before their participant row
  * was linked) are moved onto their participant. Only unclaimed (userId null) participants are touched.
  */
-export async function claimEmailEnrollments(db: Db, workspaceId: string, user: { userId: string; email: string }, mine: Participant) {
+export async function claimEmailEnrollments(db: Db, workspaceId: string, user: { userId: string; email: string | null }, mine: Participant) {
   const email = normEmail(user.email);
   if (!email) return 0;
   const pending = await db.enrollment.findMany({

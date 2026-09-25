@@ -259,8 +259,14 @@ export class MembersService {
       const existing = await tx.membership.findUnique({ where: { workspaceId_userId: { workspaceId: inv.workspaceId, userId: user.userId } } });
       if (existing) return { membership: existing, alreadyMember: true };
       const membership = await tx.membership.create({ data: { workspaceId: inv.workspaceId, userId: user.userId, role: inv.role, invitedById: inv.invitedById } });
-      // Link participant records created for this email (e.g. share-link runs) to the account.
-      await tx.participant.updateMany({ where: { workspaceId: inv.workspaceId, email: user.email.toLowerCase(), userId: null }, data: { userId: user.userId } });
+      // The invitation token was emailed to this address, which proves control of the mailbox.
+      const verified = await tx.user.updateMany({ where: { id: user.userId, email: user.email, emailVerifiedAt: null }, data: { emailVerifiedAt: new Date() } });
+      // Link participant records created for this email (e.g. share-link runs) to the account — in every
+      // workspace when the address has just been verified, as the verification link would.
+      await tx.participant.updateMany({
+        where: { ...(verified.count ? {} : { workspaceId: inv.workspaceId }), email: user.email.toLowerCase(), userId: null },
+        data: { userId: user.userId },
+      });
       return { membership, alreadyMember: false };
     });
     await this.audit.log({

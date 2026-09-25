@@ -11,7 +11,8 @@ import { claimEmailEnrollments, normEmail, participantForUser } from './particip
 
 export interface LearnerRef {
   userId: string;
-  email: string;
+  /** Verified account email only (null when unverified) — see verifiedEmail(). */
+  email: string | null;
   name: string | null;
 }
 

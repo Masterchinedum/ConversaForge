@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { roleAtLeast } from '@cf/shared';
 import { z } from 'zod';
 import { CurrentUser, CurrentWorkspace } from '../../common/auth/decorators';
-import type { Principal, WorkspaceContext } from '../../common/auth/principal';
+import { verifiedEmail, type Principal, type WorkspaceContext } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';
 import { ZodPipe } from '../../common/http/zod.pipe';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -66,7 +66,8 @@ export class SessionsController {
       workspaceId,
       scenarioId,
       channel: 'BROWSER',
-      participant: { userId: user.userId, email: user.email, name: user.name },
+      // Unverified addresses must not attach the account to anonymous participant rows with that email.
+      participant: { userId: user.userId, email: verifiedEmail(user), name: user.name },
       variables: body.variables,
       coachMode: body.coachMode,
       enrollmentId: body.enrollmentId,

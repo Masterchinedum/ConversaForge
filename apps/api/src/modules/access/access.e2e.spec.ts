@@ -357,6 +357,42 @@ describe('access & sharing (integration)', () => {
       expect((await h.req('GET', '/api/me/shared-scenarios', { token: outsider.token })).json().data.find((d: any) => d.scenario.id === org.scenario.id)).toBeUndefined();
     });
 
+    it('SECURITY: an unverified account cannot claim email grants or participant history for its address until it verifies', async () => {
+      const { AuthService } = await import('../auth/auth.service');
+      const auth = h.get(AuthService);
+      // A victim ran a share link anonymously with their email before having an account.
+      const victimEmail = `victim-${h.uid()}@test.example`;
+      const link = await createLink({ identityMode: 'EMAIL' });
+      const run = await h.req('POST', `/api/public/links/${link.token}/sessions`, { ip: h.ip(), body: { email: victimEmail, variables: { company: 'Q' } } });
+      expect(run.statusCode).toBe(201);
+      const g = await h.req('POST', grantsUrl(), { token: org.creator.token, body: { granteeType: 'EMAIL', email: victimEmail, permission: 'VIEW_RESULTS' } });
+      expect(g.statusCode).toBe(201);
+
+      // Attacker signs up with the victim's address (never verified).
+      const attacker = await h.user('Attacker', victimEmail, { verified: false });
+      expect((await h.req('GET', '/api/me/shared-scenarios', { token: attacker.token })).json().data.find((d: any) => d.scenario.id === org.scenario.id)).toBeUndefined();
+      expect((await h.req('GET', `/api/shared/scenarios/${org.scenario.id}/sessions`, { token: attacker.token })).statusCode).toBe(404);
+      expect((await h.req('GET', '/api/me/sessions', { token: attacker.token })).json().data).toHaveLength(0);
+      const participant = await h.prisma.participant.findFirstOrThrow({ where: { workspaceId: org.ws.id, email: victimEmail } });
+      expect(participant.userId).toBeNull();
+
+      // Only the mailbox owner can complete verification (link sent to that address).
+      h.mails.length = 0;
+      const sent = await h.req('POST', '/api/auth/resend-verification', { token: attacker.token });
+      expect(sent.statusCode).toBe(200);
+      const mail = h.mails.find((m) => m.to === victimEmail);
+      const token = decodeURIComponent(/verify-email\?token=([^\s]+)/.exec(mail!.text)![1]!);
+      expect((await h.req('POST', '/api/auth/verify-email', { ip: h.ip(), body: { token: token.slice(0, -2) + 'xx' } })).statusCode).toBe(400);
+      const ok = await h.req('POST', '/api/auth/verify-email', { ip: h.ip(), body: { token } });
+      expect(ok.statusCode).toBe(200);
+      expect((await h.prisma.user.findUniqueOrThrow({ where: { id: attacker.id } })).emailVerifiedAt).not.toBeNull();
+      expect((await h.prisma.participant.findUniqueOrThrow({ where: { id: participant.id } })).userId).toBe(attacker.id);
+      expect((await h.req('GET', `/api/shared/scenarios/${org.scenario.id}/sessions`, { token: attacker.token })).statusCode).toBe(200);
+      // A token bound to another address (e.g. after an email change) is rejected.
+      const forged = h.crypto.signPayload({ p: 'email_verify', u: attacker.id, e: 'someone-else@test.example' }, 60);
+      await expect(auth.verifyEmail(forged)).rejects.toMatchObject({ status: 400 });
+    });
+
     it('VIEW_RESULTS grant exposes a read-only minimal session list; WORKSPACE grants apply to its members', async () => {
       const otherOwner = await h.user('Partner');
       const partnerWs = await h.workspace(otherOwner);
