@@ -130,7 +130,7 @@ export default function ScenarioLibraryPage() {
                   <Td>{r.sessionCount ?? 0}</Td>
                   <Td className="text-xs">{formatDate(r.updatedAt)}</Td>
                   <Td className="text-right">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end gap-1">
                       <Button
                         variant="ghost"
                         size="sm"

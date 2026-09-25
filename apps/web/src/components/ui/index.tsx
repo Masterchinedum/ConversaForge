@@ -83,15 +83,18 @@ export function ButtonLink({ href, variant = 'primary', size = 'md', className, 
 const control =
   'block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-100 aria-[invalid=true]:border-red-500';
 
+/** `control` is full width by default; an explicit base width (e.g. `w-44`) from the caller must win. */
+const sized = (className?: string) => (className && /(^|\s)w-/.test(className) ? control.replace('w-full ', '') : control);
+
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...rest }, ref) {
-  return <input ref={ref} className={clsx(control, className)} {...rest} />;
+  return <input ref={ref} className={clsx(sized(className), className)} {...rest} />;
 });
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, rows = 4, ...rest }, ref) {
   return <textarea ref={ref} rows={rows} className={clsx(control, 'font-[inherit]', className)} {...rest} />;
 });
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select({ className, children, ...rest }, ref) {
   return (
-    <select ref={ref} className={clsx(control, 'pr-8', className)} {...rest}>
+    <select ref={ref} className={clsx(sized(className), 'pr-8', className)} {...rest}>
       {children}
     </select>
   );
