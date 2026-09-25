@@ -12,6 +12,8 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@cf/shared'],
   poweredByHeader: false,
+  // No server-side image optimization (avoids the native sharp/libvips dependency).
+  images: { unoptimized: true },
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
   // Trace workspace packages from the monorepo root for standalone builds.
   outputFileTracingRoot: path.join(here, '../../'),

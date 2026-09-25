@@ -177,90 +177,140 @@ export interface ExtractedDocument {
   charCount: number;
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-  let t: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      p,
-      new Promise<T>((_, rej) => {
-        t = setTimeout(() => rej(new ExtractionError(`${what} timed out after ${Math.round(ms / 1000)} s`, 'timeout')), ms);
-      }),
-    ]);
-  } finally {
-    if (t) clearTimeout(t);
+/** Sum of declared uncompressed sizes in a ZIP central directory (zip-bomb guard). */
+export function zipUncompressedSize(buf: Buffer): number {
+  let total = 0;
+  const sig = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+  let idx = buf.indexOf(sig);
+  while (idx !== -1 && idx + 46 <= buf.length) {
+    total += buf.readUInt32LE(idx + 24);
+    idx = buf.indexOf(sig, idx + 4);
   }
+  return total;
 }
 
-// unpdf is ESM-only; load it lazily via a real dynamic import (tsc would otherwise turn it into require()).
-const importEsm = new Function('s', 'return import(s)') as <T = any>(s: string) => Promise<T>;
+/** Max total uncompressed size of a DOCX archive. */
+export const MAX_DOCX_UNCOMPRESSED = 200 * 1024 * 1024;
 
-async function extractPdf(buf: Buffer): Promise<ExtractedDocument> {
-  let unpdf: any;
+/**
+ * PDF / DOCX parsing runs in a short-lived worker thread: a hostile file cannot block the event loop,
+ * memory is capped via resourceLimits, and the worker is terminated on timeout.
+ * (Also sidesteps unpdf's internal dynamic import, which does not work inside jest's VM.)
+ */
+const WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+(async () => {
   try {
-    unpdf = await importEsm('unpdf');
-  } catch (e: any) {
-    throw new ExtractionError(`PDF support is unavailable: ${e?.message ?? e}`);
-  }
-  let pdf: any;
-  try {
-    pdf = await unpdf.getDocumentProxy(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), {
-      isEvalSupported: false,
-      disableFontFace: true,
-      useSystemFonts: false,
-      stopAtErrors: false,
-    });
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    if (/password/i.test(msg)) throw new ExtractionError('The PDF is password-protected. Remove the password and upload it again.');
-    throw new ExtractionError(`Could not read the PDF (${msg.slice(0, 200)})`);
-  }
-  try {
-    const numPages: number = pdf.numPages ?? 0;
-    if (numPages > MAX_PDF_PAGES) throw new ExtractionError(`The PDF has ${numPages} pages (max ${MAX_PDF_PAGES})`, 'too_large');
-    const res = await unpdf.extractText(pdf, { mergePages: false });
-    const raw: string[] = Array.isArray(res.text) ? res.text : [String(res.text ?? '')];
-    const pages: ExtractedPage[] = [];
-    let total = 0;
-    raw.forEach((t, i) => {
-      const text = cleanText(t);
-      total += text.length;
-      if (total > MAX_EXTRACTED_CHARS) {
-        throw new ExtractionError(`The document contains more than ${MAX_EXTRACTED_CHARS.toLocaleString('en-US')} characters of text`, 'too_large');
+    const bytes = new Uint8Array(workerData.bytes);
+    if (workerData.kind === 'pdf') {
+      const u = require(workerData.modPath);
+      const pdf = await u.getDocumentProxy(bytes, { isEvalSupported: false, disableFontFace: true, useSystemFonts: false, stopAtErrors: false });
+      const numPages = pdf.numPages || 0;
+      if (numPages > workerData.maxPages) {
+        parentPort.postMessage({ ok: false, code: 'too_large', error: 'The PDF has ' + numPages + ' pages (max ' + workerData.maxPages + ')' });
+        return;
       }
-      pages.push({ page: i + 1, text });
-    });
-    return { pages, pageCount: res.totalPages ?? numPages, charCount: total };
-  } finally {
-    try {
-      await pdf.destroy?.();
-    } catch {
-      /* ignore */
+      const r = await u.extractText(pdf, { mergePages: false });
+      const pages = Array.isArray(r.text) ? r.text : [String(r.text || '')];
+      try { await pdf.destroy(); } catch (e) {}
+      parentPort.postMessage({ ok: true, pages, totalPages: r.totalPages || numPages });
+    } else {
+      const m = require(workerData.modPath);
+      const fn = m.extractRawText || (m.default && m.default.extractRawText);
+      const r = await fn({ buffer: Buffer.from(bytes) });
+      parentPort.postMessage({ ok: true, pages: [String(r.value || '')], totalPages: null });
     }
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    parentPort.postMessage({ ok: false, code: /password/i.test(msg) ? 'password' : 'invalid_file', error: msg.slice(0, 300) });
   }
+})();
+`;
+
+function runParser(
+  kind: 'pdf' | 'docx',
+  buf: Buffer,
+  timeoutMs: number,
+): Promise<{ pages: string[]; totalPages: number | null }> {
+  const { Worker } = require('node:worker_threads') as typeof import('node:worker_threads');
+  const modPath = require.resolve(kind === 'pdf' ? 'unpdf' : 'mammoth');
+  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(WORKER_SOURCE, {
+      eval: true,
+      workerData: { kind, modPath, bytes, maxPages: MAX_PDF_PAGES },
+      transferList: [bytes as ArrayBuffer],
+      resourceLimits: { maxOldGenerationSizeMb: 768, maxYoungGenerationSizeMb: 64 },
+      stdout: true,
+      stderr: true,
+    });
+    let settled = false;
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate().catch(() => undefined);
+      fn();
+    };
+    const label = kind === 'pdf' ? 'PDF' : 'Word document';
+    const timer = setTimeout(
+      () => done(() => reject(new ExtractionError(`${label} text extraction timed out after ${Math.round(timeoutMs / 1000)} s`, 'timeout'))),
+      timeoutMs,
+    );
+    worker.once('message', (msg: any) =>
+      done(() => {
+        if (msg?.ok) return resolve({ pages: msg.pages, totalPages: msg.totalPages });
+        if (msg?.code === 'too_large') return reject(new ExtractionError(msg.error, 'too_large'));
+        if (msg?.code === 'password') {
+          return reject(new ExtractionError('The PDF is password-protected. Remove the password and upload it again.'));
+        }
+        reject(new ExtractionError(`Could not read the ${label} (${msg?.error ?? 'unknown error'})`));
+      }),
+    );
+    worker.once('error', (e: any) =>
+      done(() =>
+        reject(
+          new ExtractionError(
+            e?.code === 'ERR_WORKER_OUT_OF_MEMORY' ? `The ${label} is too complex to process` : `Could not read the ${label} (${String(e?.message ?? e).slice(0, 200)})`,
+            e?.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'too_large' : 'invalid_file',
+          ),
+        ),
+      ),
+    );
+    worker.once('exit', (code) => done(() => reject(new ExtractionError(`The ${label} parser stopped unexpectedly (exit ${code})`))));
+  });
 }
 
-async function extractDocx(buf: Buffer): Promise<ExtractedDocument> {
-  const mammoth: any = await import('mammoth');
-  const fn = mammoth.extractRawText ?? mammoth.default?.extractRawText;
-  let value: string;
-  try {
-    const r = await fn({ buffer: buf });
-    value = String(r.value ?? '');
-  } catch (e: any) {
-    throw new ExtractionError(`Could not read the Word document (${String(e?.message ?? e).slice(0, 200)})`);
+function tooMuchText(): ExtractionError {
+  return new ExtractionError(`The document contains more than ${MAX_EXTRACTED_CHARS.toLocaleString('en-US')} characters of text`, 'too_large');
+}
+
+async function extractPdf(buf: Buffer, timeoutMs: number): Promise<ExtractedDocument> {
+  const r = await runParser('pdf', buf, timeoutMs);
+  const pages: ExtractedPage[] = [];
+  let total = 0;
+  r.pages.forEach((t, i) => {
+    const text = cleanText(String(t ?? ''));
+    total += text.length;
+    if (total > MAX_EXTRACTED_CHARS) throw tooMuchText();
+    pages.push({ page: i + 1, text });
+  });
+  return { pages, pageCount: r.totalPages ?? pages.length, charCount: total };
+}
+
+async function extractDocx(buf: Buffer, timeoutMs: number): Promise<ExtractedDocument> {
+  if (zipUncompressedSize(buf) > MAX_DOCX_UNCOMPRESSED) {
+    throw new ExtractionError('The Word document expands to more than 200 MB and cannot be processed', 'too_large');
   }
-  const text = cleanText(value);
-  if (text.length > MAX_EXTRACTED_CHARS) {
-    throw new ExtractionError(`The document contains more than ${MAX_EXTRACTED_CHARS.toLocaleString('en-US')} characters of text`, 'too_large');
-  }
+  const r = await runParser('docx', buf, timeoutMs);
+  const text = cleanText(r.pages.join('\n\n'));
+  if (text.length > MAX_EXTRACTED_CHARS) throw tooMuchText();
   return { pages: [{ page: null, text }], pageCount: null, charCount: text.length };
 }
 
 function extractPlain(buf: Buffer): ExtractedDocument {
   const text = cleanText(buf.toString('utf8'));
-  if (text.length > MAX_EXTRACTED_CHARS) {
-    throw new ExtractionError(`The document contains more than ${MAX_EXTRACTED_CHARS.toLocaleString('en-US')} characters of text`, 'too_large');
-  }
+  if (text.length > MAX_EXTRACTED_CHARS) throw tooMuchText();
   return { pages: [{ page: null, text }], pageCount: null, charCount: text.length };
 }
 
@@ -278,10 +328,6 @@ export async function extractDocument(
   const { kind, mimeType } = sniffDocument(buf, declaredMime, opts.fileName);
   const timeoutMs = opts.timeoutMs ?? EXTRACTION_TIMEOUT_MS;
   const doc =
-    kind === 'pdf'
-      ? await withTimeout(extractPdf(buf), timeoutMs, 'PDF text extraction')
-      : kind === 'docx'
-        ? await withTimeout(extractDocx(buf), timeoutMs, 'Word text extraction')
-        : extractPlain(buf);
+    kind === 'pdf' ? await extractPdf(buf, timeoutMs) : kind === 'docx' ? await extractDocx(buf, timeoutMs) : extractPlain(buf);
   return { ...doc, mimeType, kind };
 }

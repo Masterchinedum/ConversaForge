@@ -10,3 +10,6 @@ onlyBuiltDependencies:
   - "@nestjs/core"
   - msgpackr-extract
   - sharp
+# Keep LGPL-licensed native image libraries out of the dependency tree (Next image optimization is disabled).
+ignoredOptionalDependencies:
+  - sharp
