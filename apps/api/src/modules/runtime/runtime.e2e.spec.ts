@@ -725,6 +725,9 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       expect(tr).toEqual({ type: 'realtime.tool_result', callId: 'call_1', output: 'Progress recorded.' });
       c.send({ type: 'realtime.tool_call', callId: 'call_2', name: 'slides', arguments: '{}' });
       expect((await c.next('realtime.tool_result')).output).toMatch(/not available/);
+      // SECURITY: a scripted client cannot fire server-side tools at WebSocket speed (per-session cap).
+      for (let i = 3; i <= 22; i++) c.send({ type: 'realtime.tool_call', callId: `call_${i}`, name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
+      await c.next('realtime.tool_result', (m) => m.callId === 'call_22' && /too many tool calls/.test(m.output), 10_000);
       await eventually(async () => {
         const turns = await prisma.transcriptTurn.findMany({ where: { sessionId: s.sessionId }, orderBy: { seq: 'asc' } });
         expect(turns.map((t) => [t.speaker, t.clientTurnId, t.source])).toEqual([

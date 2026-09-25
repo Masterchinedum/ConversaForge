@@ -1,5 +1,6 @@
 import type { RuntimeVariable } from './scenario-config';
 import { PLACEHOLDER_RE } from './scenario-config';
+import { testPattern } from './safe-regex';
 
 /**
  * Runtime variable handling. Values come from untrusted sources (share-link prefills, embed init,
@@ -66,7 +67,8 @@ export function resolveVariables(
         errors.push({ key: def.key, message: 'Variable pattern is invalid' });
         continue;
       }
-      if (value.length > MAX_PATTERN_INPUT || !re.test(value)) {
+      // testPattern uses the server-installed, time-bounded tester (catastrophic backtracking → invalid).
+      if (value.length > MAX_PATTERN_INPUT || !testPattern(re, value)) {
         errors.push({ key: def.key, message: `${def.label || def.key} has an invalid format` });
         continue;
       }

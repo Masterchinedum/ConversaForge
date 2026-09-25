@@ -1,13 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import useSWR from 'swr';
 import { AccessTokensTab } from '@/components/access/AccessTokensTab';
 import { GrantsTab } from '@/components/access/GrantsTab';
 import { ShareLinksTab } from '@/components/access/ShareLinksTab';
 import type { AccessSummary } from '@/components/access/types';
-import { Alert, Badge, Card, CopyButton, ErrorState, Loading, PageHeader, Tabs } from '@/components/ui';
+import { Alert, Badge, Button, Card, CopyButton, ErrorState, Loading, PageHeader, Tabs, useToast } from '@/components/ui';
+import { api, errorMessage } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 
 type Tab = 'links' | 'grants' | 'tokens' | 'visibility';
@@ -73,11 +74,11 @@ function AccessPageInner() {
                   <code className="rounded bg-slate-100 px-2 py-1 text-xs">{data.publicUrl}</code>
                   <CopyButton value={data.publicUrl} />
                 </div>
-                <p>Gallery listing: {data.scenario.galleryListed ? 'listed' : 'not listed'}.</p>
+                <GalleryToggle scenarioId={scenarioId} listed={data.scenario.galleryListed} disabled={!data.allowPublicScenarios || !data.runnable} onChanged={() => mutate()} />
               </>
             )}
             <p className="text-slate-600">
-              Privacy and gallery listing are edited in the scenario editor (Basics → Privacy) and take effect when you publish.{' '}
+              Privacy is edited in the scenario editor (Basics → Privacy) and applies as soon as the draft is saved; a scenario is only listed in the public gallery while it is Public and published.{' '}
               <Link className="text-brand-700 hover:underline" href={href(`/scenarios/${scenarioId}`)}>
                 Open the editor
               </Link>
@@ -89,6 +90,34 @@ function AccessPageInner() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+function GalleryToggle({ scenarioId, listed, disabled, onChanged }: { scenarioId: string; listed: boolean; disabled: boolean; onChanged: () => void }) {
+  const { wsPath } = useWorkspace();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await api(wsPath(`/scenarios/${scenarioId}/gallery`), { method: 'POST', body: { listed: !listed } });
+      toast.success(listed ? 'Removed from the public gallery' : 'Listed in the public gallery');
+      onChanged();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span>
+        Gallery listing: <strong>{listed ? 'listed' : 'not listed'}</strong>
+      </span>
+      <Button size="sm" variant={listed ? 'secondary' : 'primary'} onClick={toggle} loading={busy} disabled={disabled && !listed} data-testid="gallery-toggle">
+        {listed ? 'Remove from gallery' : 'List in public gallery'}
+      </Button>
     </div>
   );
 }

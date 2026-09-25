@@ -27,7 +27,8 @@ export class AuthController {
   private setCookie(reply: FastifyReply, token: string, expiresAt: Date) {
     reply.setCookie(SESSION_COOKIE, token, {
       httpOnly: true,
-      secure: env.COOKIE_SECURE,
+      // Always Secure in production (HTTPS); COOKIE_SECURE opts in elsewhere (e.g. an HTTPS staging host).
+      secure: env.COOKIE_SECURE || env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
       expires: expiresAt,
@@ -104,6 +105,8 @@ export class AuthController {
   @HttpCode(200)
   async forgot(@Body(new ZodPipe(z.object({ email: z.string().email() }))) body: { email: string }, @Req() req: FastifyRequest) {
     await this.rateLimit.enforce(`forgot:${req.ip}`, 5, 3600);
+    // Per-address cap too, so rotating IPs cannot mail-bomb one inbox with reset links.
+    await this.rateLimit.enforce(`forgot:email:${body.email.trim().toLowerCase()}`, 3, 3600);
     await this.auth.requestPasswordReset(body.email);
     return { ok: true };
   }

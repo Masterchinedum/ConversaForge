@@ -125,7 +125,9 @@ const ended = (page: Page) => page.getByTestId('end-screen').isVisible().catch((
 async function say(page: Page, text: string) {
   const before = await savedAgentTurns(page);
   const input = page.getByTestId('typed-input');
-  await expect(input).toBeEnabled({ timeout: 30_000 });
+  // The agent may be closing the call (input goes away before the end screen shows).
+  await expect.poll(async () => (await ended(page)) || (await input.isEnabled().catch(() => false)), { timeout: 30_000 }).toBe(true);
+  if (await ended(page)) return;
   await input.fill(text);
   await page.getByRole('button', { name: 'Send' }).click();
   await expect.poll(async () => (await ended(page)) || (await savedAgentTurns(page)) > before, { timeout: 45_000 }).toBe(true);
@@ -157,7 +159,15 @@ const GOOD_ANSWERS = [
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Creator
 // ─────────────────────────────────────────────────────────────────────────────
-const shared: Record<string, string> = {};
+// State shared between journeys (persisted so a single journey can be re-run with -g after a full run).
+const SHARED_FILE = join(CACHE, 'qa-shared.json');
+const shared: Record<string, string> = new Proxy(existsSync(SHARED_FILE) ? JSON.parse(readFileSync(SHARED_FILE, 'utf8')) : {}, {
+  set(t, k, v) {
+    t[k as string] = v;
+    writeFileSync(SHARED_FILE, JSON.stringify(t, null, 2));
+    return true;
+  },
+});
 
 test.describe('1. creator', () => {
   test('sign up → org → scenarios (template, guided + assistant) → versions → duplicate → YAML → try it', async ({ browser }) => {
@@ -309,6 +319,173 @@ test.describe('1. creator', () => {
     await shot(page, '1-14-live-end');
     await ctx.close();
     expect(problems, problems.join('\n')).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. Sharing
+// ─────────────────────────────────────────────────────────────────────────────
+const SUBSTANTIVE = [
+  'In my last role I led a team of five engineers rebuilding our payments reconciliation service, which was failing nightly and delaying finance reports.',
+  'My task was to make reconciliation finish before 6am with zero manual fixes, within one quarter, without pausing feature work for the rest of the team.',
+  'I split the job into idempotent batches, added a dead letter queue, wrote a replay tool, and paired with finance every week to validate the numbers.',
+  'The job now finishes in forty minutes, manual fixes went from twenty a week to zero, and finance closes the month two days earlier than before.',
+  'When a teammate disagreed about the batching design, I set up a one hour spike so we could compare both approaches with real data before deciding.',
+  'I learned to write the success metric down before starting, and to involve the people who consume the output from the very first week.',
+];
+
+async function finishConversation(page: Page, extra: string[] = []) {
+  const answers = [...extra, ...SUBSTANTIVE, ...SUBSTANTIVE.map((a) => `Another example: ${a}`), 'No, nothing else from me. Thank you!'];
+  for (const a of answers) {
+    if (await ended(page)) break;
+    await say(page, a);
+  }
+  await expect(page.getByTestId('end-screen')).toBeVisible({ timeout: 60_000 });
+}
+
+test.describe('2. sharing', () => {
+  test('share link (one-time, passcode, name+email, prefilled variable) → anonymous run → report → reuse fails', async ({ browser }) => {
+    test.setTimeout(420_000);
+    const ws = shared.orgId!;
+    const sid = shared.templateScenarioId!;
+    const creator = await browser.newContext({ storageState: join(CACHE, `qa-${shared.creatorEmail!.replace(/[^a-z0-9]/gi, '_')}.json`) });
+    const page = await creator.newPage();
+    const problems = watch(page);
+
+    // Participant report sections: feedback yes, scores no, transcript no.
+    await page.goto(`/w/${ws}/scenarios/${sid}`);
+    await page.getByRole('tab', { name: 'Advanced' }).click();
+    const setToggle = async (label: string, on: boolean) => {
+      const box = page.getByLabel(label, { exact: true });
+      if ((await box.isChecked()) !== on) await box.click();
+    };
+    await setToggle('Participant can see the transcript', false);
+    await setToggle('Participant can see feedback', true);
+    await setToggle('Participant can see scores', false);
+    await expect(page.getByTestId('save-state')).toHaveText('All changes saved', { timeout: 10_000 });
+    await page.getByTestId('publish').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText('Published version 2')).toBeVisible();
+
+    // Create the link
+    await page.getByRole('link', { name: 'Share & access' }).click();
+    await page.waitForURL(/\/access/);
+    await shot(page, '2-01-access-empty');
+    await page.getByRole('button', { name: 'New share link' }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByLabel('Label').fill('QA one-time');
+    await dlg.getByLabel('Usage').selectOption('ONE_TIME');
+    await dlg.getByLabel('Participant identity').selectOption('NAME_EMAIL');
+    await dlg.getByLabel('Passcode').fill('open-sesame');
+    await dlg.getByLabel(/Role title/).fill('Staff Engineer');
+    await shot(page, '2-02-link-modal');
+    await dlg.getByRole('button', { name: 'Create link' }).click();
+    await expect(page.getByText(/Link created/)).toBeVisible();
+    const url = (await page.locator('code').filter({ hasText: '/r/' }).first().innerText()).trim();
+    expect(url).toMatch(/\/r\/[A-Za-z0-9_-]+$/);
+    const linkPath = new URL(url).pathname;
+    await shot(page, '2-03-access-links');
+
+    // Anonymous participant
+    const anon = await browser.newContext();
+    const p = await anon.newPage();
+    const pProblems = watch(p);
+    await p.goto(linkPath);
+    await expect(p.getByRole('heading', { name: /Behavioral interview/ })).toBeVisible();
+    await shot(p, '2-04-landing');
+    await p.getByLabel('Your name').fill('Pat Participant');
+    await p.getByLabel('Email').fill(`pat-${RUN}@example.com`);
+    await p.getByLabel('Passcode').fill('wrong-code');
+    await p.getByRole('button', { name: 'Continue' }).click();
+    await expect(p.getByText('That passcode is not correct.')).toBeVisible();
+    await p.getByLabel('Passcode').fill('open-sesame');
+    await p.getByRole('button', { name: 'Continue' }).click();
+    await p.waitForURL(/\/live\//);
+    const sessionId = new URL(p.url()).pathname.split('/').pop()!;
+    shared.sharedSessionId = sessionId;
+    await shot(p, '2-05-live-intro');
+    // Prefilled variable substituted (persona role mentions the role title)
+    await p.getByRole('button', { name: 'Continue' }).click();
+    await shot(p, '2-06-consent');
+    await p.getByLabel(/I understand I’m talking with an AI/).check();
+    const rec = p.getByLabel('Record audio of this call');
+    if (await rec.count()) await rec.check();
+    await p.getByRole('button', { name: 'Agree and continue' }).click();
+    await shot(p, '2-07-device-check');
+    await p.getByRole('button', { name: /Allow microphone/ }).click();
+    await p.getByRole('button', { name: 'Join the call' }).click();
+    await p.getByTestId('call-status').filter({ hasText: 'Live' }).waitFor({ timeout: 30_000 });
+    if (!/Typed/.test(await p.getByTestId('voice-mode').innerText())) await p.getByRole('button', { name: 'Switch to typing' }).click();
+    await expect.poll(() => savedAgentTurns(p), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect(p.getByTestId('transcript')).toContainText(/Staff Engineer|Alex/);
+    await say(p, 'Hi, thanks. I am ready to start.');
+    // Vague answer → follow-up question
+    await say(p, 'We did stuff with the database, kind of.');
+    const last = await p.locator('[data-testid="transcript"] li[data-speaker="AGENT"][data-status="saved"]').last().innerText();
+    expect(last).toMatch(/specific role|tell me a bit more|look like in practice|hardest part|specific example/i);
+    await shot(p, '2-08-follow-up');
+    await finishConversation(p);
+    await shot(p, '2-09-end');
+    // Participant report
+    await p.getByRole('link', { name: 'View your feedback' }).click();
+    await p.waitForURL(/\/report\//);
+    await expect(p.getByRole('heading', { name: /Your feedback/ })).toBeVisible();
+    await expect(p.getByText('What went well')).toBeVisible({ timeout: 90_000 });
+    await expect(p.getByText('Your scores')).toHaveCount(0);
+    await expect(p.getByText(/^Transcript \(/)).toHaveCount(0);
+    await shot(p, '2-10-report');
+
+    // One-time link cannot be reused
+    const anon2 = await browser.newContext();
+    const p2 = await anon2.newPage();
+    await p2.goto(linkPath);
+    await expect(p2.getByText(/already been used/)).toBeVisible();
+    await shot(p2, '2-11-link-used');
+    await anon2.close();
+    await anon.close();
+
+    // Public scenario via the gallery: make the scratch scenario public, publish, list it
+    const pub = shared.scratchScenarioId!;
+    await page.goto(`/w/${ws}/scenarios/${pub}`);
+    await page.getByRole('tab', { name: 'Advanced' }).click();
+    await page.locator('#field-basics-privacy select').selectOption('PUBLIC');
+    await expect(page.getByTestId('save-state')).toHaveText('All changes saved', { timeout: 10_000 });
+    await page.getByTestId('publish').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+    await expect(page.getByText(/Published version \d/)).toBeVisible();
+    await page.goto(`/w/${ws}/scenarios/${pub}/access?tab=visibility`);
+    await page.getByTestId('gallery-toggle').click();
+    await expect(page.getByText('Listed in the public gallery')).toBeVisible();
+    await shot(page, '2-12-visibility');
+
+    const anon3 = await browser.newContext();
+    const g = await anon3.newPage();
+    const gProblems = watch(g);
+    await g.goto('/gallery');
+    await g.getByPlaceholder(/Search/).first().fill('QA sales discovery');
+    const card = g.locator('article, li, div').filter({ hasText: 'QA sales discovery' }).getByRole('link', { name: /Start/ }).first();
+    await expect(card).toBeVisible();
+    await shot(g, '2-13-public-gallery');
+    await card.click();
+    await g.waitForURL(/\/p\//);
+    await expect(g.getByRole('heading', { name: 'QA sales discovery' })).toBeVisible();
+    await shot(g, '2-14-public-landing');
+    if (await g.getByLabel('Your name').isVisible()) {
+      // Submitting without the required identity gives a clear inline error
+      await g.getByRole('button', { name: 'Continue' }).click();
+      await expect(g.getByRole('alert').or(g.locator('[role="alert"], .text-red-700')).first()).toBeVisible();
+      await shot(g, '2-15-public-landing-missing-identity');
+      await g.getByLabel('Your name').fill('Gale Guest');
+      if (await g.getByLabel('Email').isVisible()) await g.getByLabel('Email').fill(`gale-${RUN}@example.com`);
+      await g.getByRole('button', { name: 'Continue' }).click();
+    } else await g.getByRole('button', { name: 'Continue' }).click();
+    await g.waitForURL(/\/live\//);
+    await joinTyped(g, { record: false });
+    await converse(g, ['Hi, this is a quick test run.'], { endIfOpen: true });
+    await anon3.close();
+    await creator.close();
+    const all = [...problems, ...pProblems, ...gProblems];
+    expect(all, all.join('\n')).toEqual([]);
   });
 });
 

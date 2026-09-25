@@ -58,10 +58,22 @@ export class MemoryService implements OnModuleInit {
    * Active facts for the live prompt, most relevant/recent first. Empty when the learner turned memory off.
    * Callers must treat the returned text as data about the learner, never as instructions.
    */
+  /**
+   * Memory is only kept for participants whose identity is established: linked to an account (userId)
+   * or identified by a trusted server-side caller (externalId: API, embed/participant token, phone).
+   * Anonymous share-link/public runs are keyed by a TYPED, unverified email that anyone can enter, so
+   * using memory there would hand one person's coaching notes to whoever types their address.
+   */
+  async hasTrustedIdentity(workspaceId: string, participantId: string): Promise<boolean> {
+    const p = await this.prisma.participant.findFirst({ where: { id: participantId, workspaceId }, select: { userId: true, externalId: true } });
+    return !!(p && (p.userId || p.externalId));
+  }
+
   async factsForSession(workspaceId: string, participantId: string, scenarioId: string | null, limit = 12): Promise<MemoryFact[]> {
     if (!workspaceId || !participantId) return [];
     const take = Math.max(0, Math.min(50, Math.floor(limit)));
     if (!take) return [];
+    if (!(await this.hasTrustedIdentity(workspaceId, participantId))) return [];
     const profile = await this.prisma.coachProfile.findUnique({ where: { workspaceId_participantId: { workspaceId, participantId } } });
     if (!profile || !profile.memoryEnabled) return [];
     const facts = await this.prisma.memoryFact.findMany({
@@ -74,6 +86,7 @@ export class MemoryService implements OnModuleInit {
 
   /** Profile data for the live prompt (goals) — null when memory is disabled for the learner. */
   async profileForSession(workspaceId: string, participantId: string): Promise<{ goals: string | null; summary: string | null } | null> {
+    if (!(await this.hasTrustedIdentity(workspaceId, participantId))) return null;
     const profile = await this.prisma.coachProfile.findUnique({ where: { workspaceId_participantId: { workspaceId, participantId } } });
     if (profile && !profile.memoryEnabled) return null;
     return { goals: profile?.goals ?? null, summary: profile?.summary ?? null };
@@ -228,6 +241,7 @@ export class MemoryService implements OnModuleInit {
     const version = await this.prisma.scenarioVersion.findFirst({ where: { id: session.scenarioVersionId, workspaceId }, select: { config: true } });
     const cfg = (version?.config ?? {}) as { memory?: { enabled?: boolean; learnFromSessions?: boolean } };
     if (!cfg.memory?.enabled || cfg.memory.learnFromSessions === false) return { status: 'skipped', reason: 'memory learning disabled for this scenario version' };
+    if (!(await this.hasTrustedIdentity(workspaceId, participantId))) return { status: 'skipped', reason: 'anonymous participant (unverified identity)' };
 
     const profile = await this.getOrCreateProfile(workspaceId, participantId);
     if (!profile.memoryEnabled) return { status: 'skipped', reason: 'learner memory disabled' };
@@ -338,7 +352,8 @@ export class MemoryService implements OnModuleInit {
   private formatTranscript(turns: Array<{ speaker: string; text: string }>) {
     const lines = turns
       .filter((t) => t.speaker !== 'SYSTEM' && t.text.trim())
-      .map((t) => `${t.speaker === 'PARTICIPANT' ? 'Learner' : 'Coach'}: ${t.text.replace(/\s+/g, ' ').trim()}`);
+      // Angle brackets → look-alikes so a turn cannot emit the "TRANSCRIPT>>>" end marker (prompt injection).
+      .map((t) => `${t.speaker === 'PARTICIPANT' ? 'Learner' : 'Coach'}: ${t.text.replace(/\s+/g, ' ').trim().replace(/</g, '‹').replace(/>/g, '›')}`);
     let text = lines.join('\n');
     if (text.length > MAX_TRANSCRIPT_CHARS) text = '…\n' + text.slice(text.length - MAX_TRANSCRIPT_CHARS);
     return text;

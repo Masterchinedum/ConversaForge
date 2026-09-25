@@ -9,6 +9,8 @@ export interface SchemaError {
   message: string;
 }
 
+import { boundedRegexTest } from '../../../common/security/regex-guard';
+
 type Schema = Record<string, any>;
 
 const MAX_DEPTH = 12;
@@ -57,10 +59,21 @@ function walk(schema: Schema, value: unknown, path: string, errors: SchemaError[
     if (typeof schema.minLength === 'number' && value.length < schema.minLength)
       errors.push({ path, message: `Must be at least ${schema.minLength} characters` });
     if (typeof schema.pattern === 'string' && schema.pattern.length <= 200 && value.length <= 5000) {
+      let re: RegExp | null = null;
       try {
-        if (!new RegExp(schema.pattern, 'u').test(value)) errors.push({ path, message: 'Does not match the required pattern' });
+        re = new RegExp(schema.pattern, 'u');
       } catch {
         /* invalid pattern in schema: ignore */
+      }
+      // Time-bounded (ReDoS guard): the value comes from the model or, in realtime mode, the client.
+      if (re) {
+        let ok = false;
+        try {
+          ok = boundedRegexTest(re, value);
+        } catch {
+          ok = false;
+        }
+        if (!ok) errors.push({ path, message: 'Does not match the required pattern' });
       }
     }
   }

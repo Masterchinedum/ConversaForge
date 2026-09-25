@@ -5,6 +5,7 @@ import type { IncomingMessage } from 'node:http';
 import type { RawData, WebSocket } from 'ws';
 import { AppError } from '../../common/http/errors';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
+import { clientIpFrom } from '../../common/security/client-ip';
 import type { EngineConnection, EngineTransport } from './engine/transport';
 import { ClientMessageSchema } from './protocol-schema';
 import { RuntimeService } from './runtime.service';
@@ -16,10 +17,9 @@ const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 const RATE_PER_SEC = 40;
 const RATE_BURST = 120;
 
+/** X-Forwarded-For is honoured only from trusted proxies (TRUST_PROXY), so it cannot be spoofed to evade limits. */
 function clientIp(req?: IncomingMessage): string {
-  const xf = req?.headers['x-forwarded-for'];
-  const first = (Array.isArray(xf) ? xf[0] : xf)?.split(',')[0]?.trim();
-  return first || req?.socket?.remoteAddress || 'unknown';
+  return clientIpFrom(req);
 }
 
 /**

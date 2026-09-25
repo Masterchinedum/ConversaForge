@@ -55,6 +55,8 @@ const MAX_TOOL_ROUNDS = 3;
 const MAX_LLM_FAILURES = 3;
 const CAP_DEFER_MAX_MS = 30_000;
 const LIVE_MAX_TOKENS = 2048;
+/** Client-relayed realtime tool calls allowed per session (per rolling minute / in total). */
+export const REALTIME_TOOL_CALLS = { perMinute: 20, perSession: 300 };
 export const LIMITS = {
   finalText: 4000,
   partialText: 2000,
@@ -781,10 +783,25 @@ export class SessionEngine {
     }
   }
 
+  /** Timestamps of recent client-reported realtime tool calls (abuse guard; see REALTIME_TOOL_CALLS). */
+  private realtimeToolCallTimes: number[] = [];
+  private realtimeToolCallTotal = 0;
+
   private async onRealtimeToolCall(msg: Extract<ClientMessage, { type: 'realtime.tool_call' }>) {
     if (!this.realtime) return this.error('bad_request', 'This session is not in realtime mode');
     const callId = String(msg.callId ?? '').slice(0, 100);
     if (!callId) return;
+    // In realtime mode tool calls are relayed by the participant's browser, so a scripted client could
+    // otherwise fire server-side tools (custom functions → customer endpoints, knowledge search, DB
+    // writes) at WebSocket speed. Cap them per session.
+    const now = Date.now();
+    this.realtimeToolCallTimes = this.realtimeToolCallTimes.filter((t) => now - t < 60_000);
+    if (this.realtimeToolCallTimes.length >= REALTIME_TOOL_CALLS.perMinute || this.realtimeToolCallTotal >= REALTIME_TOOL_CALLS.perSession) {
+      this.send({ type: 'realtime.tool_result', callId, output: 'Error: too many tool calls; continue the conversation without tools.' });
+      return;
+    }
+    this.realtimeToolCallTimes.push(now);
+    this.realtimeToolCallTotal++;
     let input: Record<string, unknown> = {};
     try {
       input = msg.arguments ? JSON.parse(String(msg.arguments).slice(0, 50_000)) : {};

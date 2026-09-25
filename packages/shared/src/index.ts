@@ -2,6 +2,7 @@ export * from './enums';
 export * from './scenario-config';
 export * from './scoring';
 export * from './variables';
+export * from './safe-regex';
 export * from './session-state';
 export * from './protocol';
 export * from './tools';

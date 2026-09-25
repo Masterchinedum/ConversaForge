@@ -7,9 +7,18 @@ export const EXTRACTION_PROMPT_VERSION = 'extract-v1';
 
 const SPEAKER_LABEL: Record<TurnLike['speaker'], string> = { AGENT: 'AGENT', PARTICIPANT: 'PARTICIPANT', SYSTEM: 'SYSTEM' };
 
+/**
+ * Participant text is untrusted: angle brackets become look-alike guillemets so a turn cannot close the
+ * <transcript> data block and smuggle "rubric"/instructions into the prompt (prompt injection). Evidence
+ * matching normalizes punctuation away, so verbatim quotes still verify.
+ */
+export function neutralizeMarkup(text: string): string {
+  return text.replace(/</g, '‹').replace(/>/g, '›');
+}
+
 /** Transcript lines prefixed with `[seq] SPEAKER:`. Newlines inside a turn are flattened. */
 export function renderTranscript(turns: TurnLike[], maxChars = 180_000): string {
-  const lines = turns.map((t) => `[${t.seq}] ${SPEAKER_LABEL[t.speaker]}: ${t.text.replace(/\s*\n+\s*/g, ' ').trim()}`);
+  const lines = turns.map((t) => `[${t.seq}] ${SPEAKER_LABEL[t.speaker]}: ${neutralizeMarkup(t.text.replace(/\s*\n+\s*/g, ' ').trim())}`);
   let out = lines.join('\n');
   if (out.length > maxChars) {
     // Keep the start and the end; the middle is summarized as omitted (rare: >3h transcripts).

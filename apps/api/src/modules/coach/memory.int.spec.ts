@@ -48,7 +48,8 @@ async function makeScenario(workspaceId: string, name: string, memoryEnabled: bo
 }
 
 async function participant(workspaceId: string, name: string) {
-  return prisma.participant.create({ data: { workspaceId, name, email: `${name.toLowerCase()}-${rand()}@example.com` } });
+  // Identified learner (memory is only kept for account-linked or externally identified participants).
+  return prisma.participant.create({ data: { workspaceId, name, email: `${name.toLowerCase()}-${rand()}@example.com`, externalId: `ext-${rand()}` } });
 }
 
 async function fact(workspaceId: string, participantId: string, content: string, extra: Partial<Prisma.MemoryFactUncheckedCreateInput> = {}) {
@@ -83,6 +84,16 @@ afterAll(async () => prisma.$disconnect());
 afterEach(() => useProvider(null));
 
 describe('learner isolation', () => {
+  it('SECURITY: anonymous (typed-email) participants get no memory — anyone can type that email on a share link', async () => {
+    const anon = await prisma.participant.create({ data: { workspaceId: ws1.id, name: 'Anon', email: `anon-${rand()}@example.com` } });
+    await fact(ws1.id, anon.id, 'Anon is going through a difficult divorce');
+    expect(await memory.factsForSession(ws1.id, anon.id, scenarioMem.id, 10)).toEqual([]);
+    expect(await memory.profileForSession(ws1.id, anon.id)).toBeNull();
+    const s = await finishedSession(ws1.id, scenarioMem, anon.id, [['PARTICIPANT', 'I want to get better at negotiating.']]);
+    const r = await memory.learnFromSession(s.id);
+    expect(r).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/anonymous/) });
+  });
+
   it("never returns learner A's facts for learner B, nor across workspaces", async () => {
     const a = await participant(ws1.id, 'Alice');
     const b = await participant(ws1.id, 'Bob');

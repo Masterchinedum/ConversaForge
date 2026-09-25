@@ -6,6 +6,8 @@ import {
   type Channel,
   type ScenarioConfig,
 } from '@cf/shared';
+// Installs the time-bounded tester for runtime variable patterns (ReDoS guard).
+import '../../common/security/regex-guard';
 import { env } from '../../config/env';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { Errors } from '../../common/http/errors';

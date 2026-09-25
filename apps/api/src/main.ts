@@ -25,7 +25,11 @@ async function bootstrap() {
     // Signed media/download tokens travel as a path param (/api/media/signed/<token>); Fastify's default
     // maxParamLength (100) would reject them with 414.
     maxParamLength: 2048,
-    genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => (req.headers['x-request-id'] as string) || randomUUID(),
+    // Accept a caller-supplied request id only if it is short and plain (it is echoed in logs and errors).
+    genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => {
+      const id = req.headers['x-request-id'];
+      return typeof id === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(id) ? id : randomUUID();
+    },
     logger: false,
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {

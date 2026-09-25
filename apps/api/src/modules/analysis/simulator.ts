@@ -155,7 +155,7 @@ export function simulateScoring(
     .map((r) => {
       const c = criteria.find((x) => x.id === r.criterionId)!;
       return c.strongPerformance
-        ? `Practise "${c.name}": aim for — ${c.strongPerformance}`
+        ? `Practise "${c.name}". What good looks like: ${c.strongPerformance}`
         : `Practise "${c.name}" with a specific example, including numbers and the outcome.`;
     });
   if (!improvements.length) improvements.push('Keep using concrete examples with measurable outcomes.');

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SCENARIO_TYPES, PRIVACY, IDENTITY_MODES } from './enums';
+import { regexPatternRisk } from './safe-regex';
 
 /**
  * ScenarioConfig is the single source of truth for a scenario's behavior.
@@ -455,7 +456,9 @@ export function validateScenarioForPublish(input: unknown): {
   c.variables.allowlist.forEach((v, idx) => {
     if (v.pattern) {
       try {
-        new RegExp(`^(?:${v.pattern})$`);
+        new RegExp(`^(?:${v.pattern})$`, 'u');
+        const risk = regexPatternRisk(v.pattern);
+        if (risk) issues.push({ path: `variables.allowlist.${idx}.pattern`, message: risk, severity: 'error' });
       } catch {
         issues.push({ path: `variables.allowlist.${idx}.pattern`, message: 'Invalid pattern', severity: 'error' });
       }

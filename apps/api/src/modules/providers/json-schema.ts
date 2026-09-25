@@ -9,6 +9,8 @@
  * `$ref`/`$defs`/`if`/`then`/`not`/`patternProperties`/dependent* are rejected at save time so a
  * schema never silently validates less than it appears to.
  */
+import { regexPatternRisk } from '@cf/shared';
+import { boundedRegexTest } from '../../common/security/regex-guard';
 
 export const MAX_SCHEMA_BYTES = 16 * 1024;
 export const MAX_SCHEMA_DEPTH = 8;
@@ -142,7 +144,7 @@ function walk(s: unknown, path: string, depth: number, issues: SchemaIssue[]) {
         break;
       case 'pattern':
         if (typeof v !== 'string' || v.length > 200) issues.push({ path: at(k), message: 'pattern must be a string (max 200 chars)' });
-        else if (/(\([^)]*[+*][^)]*\))[+*{]/.test(v)) issues.push({ path: at(k), message: 'pattern contains nested quantifiers (catastrophic backtracking risk)' });
+        else if (regexPatternRisk(v)) issues.push({ path: at(k), message: `pattern rejected: ${regexPatternRisk(v)}` });
         else {
           try {
             new RegExp(v, 'u');
@@ -201,9 +203,11 @@ export function validateValue(schema: unknown, value: unknown, path = '', out: S
     if (typeof schema.maxLength === 'number' && len > schema.maxLength) out.push({ path, message: `must be at most ${schema.maxLength} characters` });
     if (typeof schema.pattern === 'string' && s.length <= 10_000) {
       try {
-        if (!new RegExp(schema.pattern, 'u').test(s)) out.push({ path, message: `must match pattern ${schema.pattern}` });
+        // Time-bounded: argument values are model output (steerable by participants).
+        if (!boundedRegexTest(new RegExp(schema.pattern, 'u'), s)) out.push({ path, message: `must match pattern ${schema.pattern}` });
       } catch {
-        /* invalid pattern rejected at save time */
+        /* invalid pattern rejected at save time; a timed-out evaluation counts as no match */
+        out.push({ path, message: `must match pattern ${schema.pattern}` });
       }
     }
   }

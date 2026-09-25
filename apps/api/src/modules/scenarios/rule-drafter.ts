@@ -505,13 +505,14 @@ export function ruleBasedDraft(instruction: string, draft: ScenarioConfig, locke
 
 function extractKindPhrase(text: string): string | null {
   const m = text.match(
-    /\b((?:[a-z-]+\s){0,3}(?:interview|call|negotiation|conversation|demo|walkthrough|session|meeting|review|one-on-one|1:1|pitch))\b/i,
+    /\b((?:[a-z][a-z-]*\s){0,3}(?:interview|call|negotiation|conversation|demo|walkthrough|session|meeting|review|one-on-one|1:1|pitch))\b/i,
   );
   if (!m) return null;
+  // "a 10-minute sales call" can match from "minute …" (the digits are not part of the word class).
   const phrase = m[1]!
     .trim()
     .replace(/^(?:a|an|the|\d+[- ]?minutes?|\d+[- ]?min)\s+/i, '')
-    .replace(/^(?:\d+[- ]?minutes?|\d+[- ]?min)\s+/i, '')
+    .replace(/^(?:\d+[- ]?minutes?|\d+[- ]?min|minutes?|min)\s+/i, '')
     .replace(/^(?:a|an|the)\s+/i, '');
   return phrase.length >= 3 ? phrase.toLowerCase() : null;
 }

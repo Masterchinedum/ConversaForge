@@ -78,6 +78,9 @@ export class AuthGuard implements CanActivate {
   private async resolveApiKey(token: string): Promise<Principal | null> {
     const k = await this.prisma.apiKey.findUnique({ where: { keyHash: this.crypto.sha256(token) } });
     if (!k || k.revokedAt || (k.expiresAt && k.expiresAt < new Date())) return null;
+    // A key stops working when its workspace is deleted (no relation on ApiKey, so check explicitly).
+    const ws = await this.prisma.workspace.findFirst({ where: { id: k.workspaceId, deletedAt: null }, select: { id: true } });
+    if (!ws) return null;
     if (!k.lastUsedAt || Date.now() - k.lastUsedAt.getTime() > 60_000) {
       void this.prisma.apiKey.update({ where: { id: k.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
     }
