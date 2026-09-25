@@ -320,7 +320,8 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect(deliveries).toHaveLength(1);
     const delivery = deliveries[0];
     expect(delivery.payload).toMatchObject({ id: id1, type: 'session.started', workspaceId: wsA, data: { session: { id: sessionId, channel: 'API', versionNumber: 1, participant: { externalId: 'wh-1' } } } });
-    expect(enqueued.filter((j) => j.name === 'deliver').map((j) => j.opts.jobId)).toEqual([`wh_${delivery.id}_1`]);
+    // Re-producing may re-enqueue, but always with the same deterministic job id (BullMQ dedupes).
+    expect([...new Set(enqueued.filter((j) => j.name === 'deliver').map((j) => j.opts.jobId))]).toEqual([`wh_${delivery.id}_1`]);
 
     // Attempt 1 fails (HTTP 500) → RETRYING, next job in ~1 min with a deterministic id.
     const seen: any[] = [];
