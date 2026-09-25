@@ -991,12 +991,13 @@ model KnowledgeChunk {
   heading     String?
   tokenCount  Int                      @default(0)
   // Generated column (see migration): to_tsvector('english', coalesce(heading,'') || ' ' || text)
-  tsv         Unsupported("tsvector")?
+  tsv         Unsupported("tsvector")? @default(dbgenerated())
   createdAt   DateTime                 @default(now())
   document    KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, ordinal])
   @@index([workspaceId])
+  @@index([tsv], map: "KnowledgeChunk_tsv_idx", type: Gin)
 }
 
 // ───────────────────────────── Integrations ─────────────────────────────

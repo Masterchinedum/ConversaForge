@@ -53,8 +53,10 @@ Run a one-off API: `cd apps/api && npx tsc -p tsconfig.build.json && PORT=4100 n
 Run a web dev server on another port without clobbering others: `NEXT_DIST_DIR=.next-myname WEB_PORT=3100 API_INTERNAL_URL=http://localhost:4100 pnpm --filter @cf/web dev`.
 
 ### Schema changes
-- `apps/api/prisma/schema.prisma` is shared. Additive changes only (new fields with defaults, new models, new indexes). Never rename/delete someone else's fields.
-- Do **not** create migration files during development. Apply with `cd apps/api && pnpm db:sync`. The initial migration is generated at the end from the final schema.
+- `apps/api/prisma/schema.prisma` is the single schema. Production uses migrations in `apps/api/prisma/migrations` (`prisma migrate deploy`).
+- The initial migration was generated with `apps/api/scripts/create-initial-migration.sh` (schema + `prisma/sql/post-push.sql`). After launch, never regenerate it: create new migrations with `cd apps/api && pnpm prisma:dev --name <change>`, review the SQL, and keep them backward compatible (expand → deploy → contract).
+- `KnowledgeChunk.tsv` is a Postgres GENERATED column (`@default(dbgenerated())` tells Prisma not to manage it); never write it from code.
+- Quick local iteration without migrations: `cd apps/api && pnpm db:sync` (db push + raw SQL objects).
 
 ## API conventions
 
