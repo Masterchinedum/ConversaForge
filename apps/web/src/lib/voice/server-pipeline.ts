@@ -166,8 +166,8 @@ export class ServerPipelineAdapter extends Emitter<VoiceEvents> implements Voice
     this.started = false;
     this.vad?.stop();
     this.capture?.stop();
+    this.speaker?.dispose(); // may emit a final 'interrupted' playback event
     this.unsubs.forEach((u) => u());
-    this.speaker?.dispose();
     this.detector.dispose();
   }
 

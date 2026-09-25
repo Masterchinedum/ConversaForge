@@ -84,6 +84,18 @@ test('tool panels: notepad, upload, whiteboard (real) + cards, multiple choice, 
   await expect(mc.getByText('Answer submitted')).toBeVisible();
   expect(sent.find((m) => m.type === 'tool.response' && m.toolCallId === 'inj_mc')?.result).toMatchObject({ selected: [1], answers: ['DynamoDB'] });
 
+  // Agent-drawn diagram (whiteboard with nodes/edges) renders as an accessible SVG.
+  inject({
+    type: 'tool.present',
+    tool: {
+      toolCallId: 'inj_wb',
+      toolId: 'whiteboard',
+      title: 'Architecture',
+      args: { title: 'Architecture', nodes: [{ id: 'lb', label: 'Load balancer' }, { id: 'api', label: 'API' }, { id: 'db', label: 'Postgres' }], edges: [{ from: 'lb', to: 'api' }, { from: 'api', to: 'db', label: 'SQL' }] },
+    },
+  });
+  await expect(panel.getByRole('img', { name: /Architecture\. 3 boxes: Load balancer, API, Postgres/ })).toBeVisible();
+
   // tool.close removes the card
   inject({ type: 'tool.close', toolCallId: 'inj_card' });
   await expect(panel.getByText('Design a URL shortener')).toHaveCount(0);

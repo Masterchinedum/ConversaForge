@@ -89,9 +89,10 @@ export function useLiveCall(o: UseLiveCallOptions) {
       const caps = detectCapabilities();
       const hasMic = !!devices.micStream?.getAudioTracks().some((t) => t.readyState === 'live');
       const plan = planVoice(config, caps, { hasMic, unavailable: unavailable.current, preferTyped: devices.preferTyped });
+      // Stop the old adapter while still subscribed, so an interrupted playback is reported to the server.
+      voiceRef.current?.stop();
       voiceUnsubs.current.forEach((u) => u());
       voiceUnsubs.current = [];
-      voiceRef.current?.stop();
       const vc = createVoiceClient(
         plan,
         config,
@@ -360,7 +361,8 @@ export function useLiveCall(o: UseLiveCallOptions) {
       }),
     ];
     conn.connect();
-    (window as any).__cfLive = { drop: () => conn.simulateDrop(), conn };
+    // Test hook (dev/e2e only): simulate network drops and inspect the connection.
+    if (process.env.NODE_ENV !== 'production') (window as any).__cfLive = { drop: () => conn.simulateDrop(), conn };
     const onUnload = () => {
       recorderRef.current?.stopOnUnload();
     };

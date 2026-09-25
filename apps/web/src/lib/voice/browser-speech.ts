@@ -332,8 +332,8 @@ export class BrowserSpeechAdapter extends Emitter<VoiceEvents> implements VoiceC
     this.vad?.stop();
     this.vad = null;
     this.detector.dispose();
+    this.speaker?.dispose(); // may emit a final 'interrupted' playback event
     this.unsubs.forEach((u) => u());
-    this.speaker?.dispose();
   }
 
   setMuted(muted: boolean): void {

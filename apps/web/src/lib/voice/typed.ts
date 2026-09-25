@@ -33,8 +33,8 @@ export class TypedAdapter extends Emitter<VoiceEvents> implements VoiceClient {
   }
 
   stop(): void {
+    this.speaker?.dispose(); // may emit a final 'interrupted' playback event
     this.unsubs.forEach((u) => u());
-    this.speaker?.dispose();
   }
 
   setMuted(muted: boolean): void {

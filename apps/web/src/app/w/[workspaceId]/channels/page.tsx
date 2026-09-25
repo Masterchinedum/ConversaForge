@@ -68,9 +68,9 @@ const statusTone: Record<string, 'gray' | 'green' | 'yellow' | 'red' | 'blue' | 
   ABANDONED: 'yellow',
 };
 
-function ProviderBanner({ ok, title, okText, reason }: { ok: boolean; title: string; okText: string; reason: string | null }) {
+function ProviderBanner({ ok, title, okText, reason, badText = 'Not configured' }: { ok: boolean; title: string; okText: string; reason: string | null; badText?: string }) {
   return (
-    <Alert tone={ok ? 'success' : 'warning'} title={`${title}: ${ok ? okText : 'Not configured'}`}>
+    <Alert tone={ok ? 'success' : 'warning'} title={`${title}: ${ok ? okText : badText}`}>
       {!ok && reason && <span className="text-xs">{reason}</span>}
     </Alert>
   );
@@ -774,7 +774,7 @@ export default function ChannelsPage() {
             <ProviderBanner ok={av.data.twilio.configured} title="Twilio" okText={`Configured (${av.data.twilio.source} credentials)`} reason={av.data.twilio.reason} />
             <ProviderBanner ok={av.data.speech.ready} title="Server speech (phone)" okText={`STT ${av.data.speech.stt}, TTS ${av.data.speech.tts}`} reason={av.data.speech.reason} />
             <ProviderBanner ok={av.data.recall.configured} title="Recall.ai" okText={`Configured (${av.data.recall.region})`} reason={av.data.recall.reason} />
-            <ProviderBanner ok={av.data.publicUrl.ok} title="Public API URL" okText={av.data.publicUrl.apiPublicUrl} reason={av.data.publicUrl.reason} />
+            <ProviderBanner ok={av.data.publicUrl.ok} title="Public API URL" okText={av.data.publicUrl.apiPublicUrl} badText={`${av.data.publicUrl.apiPublicUrl} is not publicly reachable`} reason={av.data.publicUrl.reason} />
           </div>
           <Tabs
             tabs={[
