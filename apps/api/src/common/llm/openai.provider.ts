@@ -4,8 +4,9 @@ import { parseJsonLoose } from './anthropic.provider';
 
 type OAIMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
-function toOpenAIMessages(system: string, messages: LlmMessage[]): OAIMessage[] {
+function toOpenAIMessages(system: string, messages: LlmMessage[], systemDynamic?: string): OAIMessage[] {
   const out: OAIMessage[] = [{ role: 'system', content: system }];
+  if (systemDynamic) out.push({ role: 'system', content: systemDynamic });
   for (const m of messages) {
     if (typeof m.content === 'string') {
       out.push({ role: m.role, content: m.content } as OAIMessage);
@@ -48,7 +49,7 @@ export class OpenAIProvider implements LlmProvider {
         stream_options: { include_usage: true },
         max_completion_tokens: req.maxTokens ?? 4096,
         temperature: req.temperature,
-        messages: toOpenAIMessages(req.system, req.messages),
+        messages: toOpenAIMessages(req.system, req.messages, req.systemDynamic),
         ...(req.tools?.length
           ? { tools: req.tools.map((t) => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } })) }
           : {}),

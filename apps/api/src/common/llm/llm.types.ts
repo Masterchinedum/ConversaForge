@@ -10,6 +10,12 @@ export type LlmContentBlock =
 export interface LlmMessage {
   role: 'user' | 'assistant';
   content: string | LlmContentBlock[];
+  /**
+   * Optional provider-native content for an assistant message (e.g. Anthropic blocks including
+   * `thinking` blocks with signatures). When present and the provider matches, it is sent verbatim
+   * instead of `content` — required to continue a tool-use round with thinking enabled.
+   */
+  raw?: { provider: LlmProviderId; content: unknown[] };
 }
 
 export interface LlmToolSpec {
@@ -28,7 +34,14 @@ export interface LlmUsage {
 }
 
 export interface ChatRequest {
+  /** Stable system prompt (prompt-cacheable). */
   system: string;
+  /**
+   * Optional second, per-request system block (live context / conversation state). Sent after the
+   * stable block without a cache breakpoint (Anthropic: second system text block; OpenAI: second
+   * system message) so the stable block stays cacheable.
+   */
+  systemDynamic?: string;
   messages: LlmMessage[];
   tools?: LlmToolSpec[];
   maxTokens?: number;
@@ -44,7 +57,14 @@ export interface ChatRequest {
 export type LlmStreamEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'done'; stopReason: string; usage: LlmUsage; content: LlmContentBlock[] };
+  | {
+      type: 'done';
+      stopReason: string;
+      usage: LlmUsage;
+      content: LlmContentBlock[];
+      /** Provider-native assistant content (see LlmMessage.raw), for tool-use continuation. */
+      raw?: { provider: LlmProviderId; content: unknown[] };
+    };
 
 export interface JsonRequest {
   system: string;

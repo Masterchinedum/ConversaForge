@@ -11,6 +11,10 @@ export const QUEUES = {
   notifications: 'notifications',
   channels: 'channels',
   maintenance: 'maintenance',
+  /** F: course item attempt completion after session.terminal / session.analyzed. */
+  courses: 'course-progress',
+  /** F: coach memory learning after session.analyzed / session.terminal. */
+  memory: 'coach-memory',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 

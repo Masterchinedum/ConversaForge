@@ -1,0 +1,13 @@
+# Automatic HTTPS via Let's Encrypt. WebSockets (/ws/*) go straight to the API.
+{$APP_DOMAIN} {
+	encode zstd gzip
+	@ws path /ws/*
+	reverse_proxy @ws api:4000
+	@api path /api/* /health
+	reverse_proxy @api api:4000
+	reverse_proxy web:3000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+}

@@ -13,3 +13,4 @@ apps/web/playwright-report
 .turbo
 *.tsbuildinfo
 .DS_Store
+.dist-*

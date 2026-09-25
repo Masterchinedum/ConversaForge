@@ -78,6 +78,12 @@ const EnvSchema = z.object({
   // ── Limits ──
   DEFAULT_MAX_SESSION_MINUTES: z.coerce.number().default(30),
   PUBLIC_RUN_RATE_LIMIT_PER_HOUR: z.coerce.number().default(20),
+
+  // ── Billing (E) — product logic never depends on a specific payment provider ──
+  /** Billing adapter id: "none" (default, no charges) or "stripe" (stub; see docs/workstreams/E-access-admin.md). */
+  BILLING_PROVIDER: z.enum(['none', 'stripe']).default('none'),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   /** Run BullMQ workers in the API process (dev). In prod run `node dist/worker.js` separately. */
   RUN_WORKERS_IN_API: z
     .string()

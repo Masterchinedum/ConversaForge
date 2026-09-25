@@ -14,14 +14,32 @@ function toAnthropicMessages(messages: LlmMessage[]): Anthropic.MessageParam[] {
   return messages.map((m) => ({
     role: m.role,
     content:
-      typeof m.content === 'string'
-        ? m.content
-        : m.content.map((b): Anthropic.ContentBlockParam => {
-            if (b.type === 'text') return { type: 'text', text: b.text };
-            if (b.type === 'tool_use') return { type: 'tool_use', id: b.id, name: b.name, input: b.input };
-            return { type: 'tool_result', tool_use_id: b.toolUseId, content: b.content, is_error: b.isError };
-          }),
+      m.role === 'assistant' && m.raw?.provider === 'anthropic'
+        ? (m.raw.content as Anthropic.ContentBlockParam[])
+        : toAnthropicContent(m),
   }));
+}
+
+function toAnthropicContent(m: LlmMessage): Anthropic.MessageParam['content'] {
+  return typeof m.content === 'string'
+    ? m.content
+    : m.content.map((b): Anthropic.ContentBlockParam => {
+        if (b.type === 'text') return { type: 'text', text: b.text };
+        if (b.type === 'tool_use') return { type: 'tool_use', id: b.id, name: b.name, input: b.input };
+        return { type: 'tool_result', tool_use_id: b.toolUseId, content: b.content, is_error: b.isError };
+      });
+}
+
+/** Response blocks → request params, keeping thinking blocks (with signatures) unchanged for tool continuation. */
+function toRawParams(blocks: Anthropic.ContentBlock[]): Anthropic.ContentBlockParam[] {
+  const out: Anthropic.ContentBlockParam[] = [];
+  for (const b of blocks) {
+    if (b.type === 'text') out.push({ type: 'text', text: b.text });
+    else if (b.type === 'tool_use') out.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input });
+    else if (b.type === 'thinking') out.push({ type: 'thinking', thinking: b.thinking, signature: b.signature });
+    else if (b.type === 'redacted_thinking') out.push({ type: 'redacted_thinking', data: b.data });
+  }
+  return out;
 }
 
 export class AnthropicProvider implements LlmProvider {
@@ -37,7 +55,11 @@ export class AnthropicProvider implements LlmProvider {
     const params: Anthropic.MessageStreamParams = {
       model,
       max_tokens: req.maxTokens ?? 4096,
-      system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
+      system: [
+        { type: 'text', text: req.system, cache_control: { type: 'ephemeral' } },
+        // Volatile per-request context goes after the cache breakpoint so the stable block stays cached.
+        ...(req.systemDynamic ? [{ type: 'text' as const, text: req.systemDynamic }] : []),
+      ],
       messages: toAnthropicMessages(req.messages),
       ...(req.tools?.length
         ? {
@@ -71,6 +93,7 @@ export class AnthropicProvider implements LlmProvider {
       type: 'done',
       stopReason: final.stop_reason ?? 'end_turn',
       content,
+      raw: { provider: 'anthropic', content: toRawParams(final.content) },
       usage: {
         provider: 'anthropic',
         model,

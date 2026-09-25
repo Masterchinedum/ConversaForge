@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: conversaforge_ci }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+      redis:
+        image: valkey/valkey:8-alpine
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/conversaforge_ci
+      REDIS_URL: redis://localhost:6379
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      SIGNING_SECRET: ci-signing-secret-ci-signing-secret-ci
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cf/shared build && pnpm --filter @cf/shared test
+      - name: Database schema
+        working-directory: apps/api
+        run: |
+          npx prisma migrate deploy
+          npx prisma generate
+      - run: pnpm --filter @cf/api typecheck
+      - run: pnpm --filter @cf/api build
+      - run: pnpm --filter @cf/api test
+      - run: pnpm --filter @cf/web typecheck
+      - run: pnpm --filter @cf/web build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f infra/docker/api.Dockerfile -t conversaforge-api:ci .
+      - run: docker build -f infra/docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_WS_URL=wss://example.com -t conversaforge-web:ci .

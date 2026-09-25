@@ -1,0 +1,82 @@
+# Single-host production deployment (Docker Compose). See docs/DEPLOYMENT.md.
+# Required: a .env.production file next to this compose file (template: /.env.example) and DNS for APP_DOMAIN.
+name: conversaforge
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+
+  web:
+    image: ${REGISTRY:-conversaforge}/web:${VERSION:-latest}
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    depends_on: [api]
+
+  api:
+    image: ${REGISTRY:-conversaforge}/api:${VERSION:-latest}
+    restart: unless-stopped
+    command: ["api"]
+    env_file: .env.production
+    environment:
+      RUN_WORKERS_IN_API: "false"
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes: [storage:/data/storage]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  worker:
+    image: ${REGISTRY:-conversaforge}/api:${VERSION:-latest}
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env.production
+    environment:
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes: [storage:/data/storage]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  migrate:
+    image: ${REGISTRY:-conversaforge}/api:${VERSION:-latest}
+    command: ["migrate"]
+    env_file: .env.production
+    depends_on:
+      postgres: { condition: service_healthy }
+    profiles: ["migrate"]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-conversaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: conversaforge
+    volumes: [pgdata:/var/lib/postgresql/data, ./backups:/backups]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-conversaforge}"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
+  caddy_data:
+  caddy_config:

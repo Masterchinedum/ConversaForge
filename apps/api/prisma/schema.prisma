@@ -280,6 +280,8 @@ model UsageAlert {
   thresholdPct   Int
   valueAtTrigger Float
   acknowledgedAt DateTime?
+  acknowledgedById String?
+  notifiedAt     DateTime? // E: admins emailed about this alert
   createdAt      DateTime  @default(now())
 
   @@unique([workspaceId, metric, periodKey, thresholdPct])
@@ -388,6 +390,10 @@ model DraftAssistantProposal {
   status        String    @default("PENDING") // PENDING | APPLIED | PARTIAL | REJECTED | STALE
   appliedPaths  String[]
   provider      String?
+  model         String? // model id used (e.g. "claude-opus-5"; "local-simulator")
+  simulated     Boolean   @default(false) // produced by the local simulator (rule-based drafter)
+  // [{ path, reason }] — proposed changes that were stripped (locked/unknown path, invalid value)
+  dropped       Json      @default("[]")
   createdById   String?
   createdAt     DateTime  @default(now())
   resolvedAt    DateTime?
@@ -581,9 +587,11 @@ model Session {
   errorMessage      String?
   analysisStatus    ProcessingStatus @default(NOT_STARTED)
   analysisError     String?
+  analysisGeneration Int             @default(0) // D: bumped on each (re)processing run; job ids carry it
   usageFinalizedAt  DateTime?
   externalRef       String? // e.g. telephony call sid, meeting bot id
   retentionUntil    DateTime?
+  contentRedactedAt DateTime? // E: transcript/evidence text redacted by the retention job
   deletedAt         DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -722,6 +730,7 @@ model ProcessingJob {
   sessionId      String?
   kind           String // finalize_transcript | score | extract | report | analytics | notify | knowledge_ingest | webhook
   idempotencyKey String           @unique
+  generation     Int              @default(1) // D: analysis generation (Session.analysisGeneration) this job belongs to
   status         ProcessingStatus @default(QUEUED)
   attempts       Int              @default(0)
   lastError      String?
@@ -760,11 +769,13 @@ model Evaluation {
   reviewedAt           DateTime?
   reviewNote           String?
   error                String?
+  generation           Int              @default(1) // D: analysis generation that produced it (unique per session)
   createdAt            DateTime         @default(now())
   completedAt          DateTime?
   session              Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   criteria             CriterionScore[]
 
+  @@unique([sessionId, generation])
   @@index([sessionId])
   @@index([workspaceId, createdAt])
 }
@@ -842,12 +853,15 @@ model MemoryFact {
   content         String
   confidence      Float?
   disabled        Boolean      @default(false)
+  simulated       Boolean      @default(false) // F: produced by the local simulator heuristics (labeled in UI)
+  metadata        Json         @default("{}") // F: { source: 'llm'|'simulator'|'manual', evaluationId?, ... }
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   deletedAt       DateTime?
   coachProfile    CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, participantId])
+  @@index([sourceSessionId])
 }
 
 // ───────────────────────────── Courses ─────────────────────────────
@@ -922,6 +936,7 @@ model Enrollment {
 
   @@unique([courseId, participantId])
   @@index([workspaceId])
+  @@index([userId])
 }
 
 model CourseItemAttempt {
@@ -932,6 +947,8 @@ model CourseItemAttempt {
   status       String     @default("STARTED") // STARTED | COMPLETED | FAILED
   sessionId    String?    @unique
   score        Float?
+  statusReason String? // F: why an attempt is not (yet) complete, e.g. "Waiting for scoring", "Insufficient evidence"
+  evaluationId String? // F: evaluation that decided a min_score rule
   startedAt    DateTime   @default(now())
   completedAt  DateTime?
   enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
@@ -1155,6 +1172,8 @@ model DataRequest {
   resultAssetId String?
   requestedById String?
   error         String?
+  summary       Json      @default("{}") // E: counts of exported/deleted records
+  startedAt     DateTime?
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
 

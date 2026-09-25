@@ -39,6 +39,7 @@ export const CAPABILITIES = {
   'sessions.review': 'REVIEWER',
   'analytics.view': 'REVIEWER',
   'exports.download': 'REVIEWER',
+  'sessions.delete': 'ADMIN',
   'memory.manage': 'REVIEWER',
   'scenarios.run': 'MEMBER',
 } as const satisfies Record<string, Role>;
