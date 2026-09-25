@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 import { ButtonLink } from '@/components/ui';
 import type { SessionState } from '@cf/shared';
 import { formatClock } from './branding';
@@ -40,6 +41,18 @@ export function EndScreen({
 }) {
   const copy = (state && COPY[state]) ?? COPY.COMPLETED!;
   const completed = state === 'COMPLETED' || state === 'ENDING' || !state;
+  // "Play All" in a course: continue automatically after a short, cancellable countdown.
+  const autoContinue = !!returnUrl && /[?&]playAll=1\b/.test(returnUrl) && !embedded;
+  const [countdown, setCountdown] = useState<number | null>(autoContinue ? 8 : null);
+  useEffect(() => {
+    if (countdown === null || !returnUrl) return;
+    if (countdown <= 0) {
+      window.location.assign(returnUrl);
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, returnUrl]);
   return (
     <div data-testid="end-screen" data-state={state ?? ''}>
       <StatusScreen
@@ -54,8 +67,13 @@ export function EndScreen({
             )}
             {returnUrl && (
               <ButtonLink href={returnUrl} variant="secondary">
-                Back to course
+                {countdown !== null ? `Continue course (${countdown})` : 'Back to course'}
               </ButtonLink>
+            )}
+            {countdown !== null && (
+              <button type="button" className="text-sm text-slate-600 underline" onClick={() => setCountdown(null)}>
+                Stay on this page
+              </button>
             )}
           </>
         }

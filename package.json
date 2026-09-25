@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "pnpm -r --filter @cf/shared build && pnpm -r --filter @cf/api build && pnpm -r --filter @cf/web build",
     "build:shared": "pnpm --filter @cf/shared build",
@@ -13,5 +15,12 @@
     "test": "pnpm -r test",
     "db:migrate": "pnpm --filter @cf/api prisma:migrate",
     "db:seed": "pnpm --filter @cf/api seed"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.23",
+      "fastify": "^5.12.1",
+      "deepmerge-ts": "^8.0.0"
+    }
   }
 }

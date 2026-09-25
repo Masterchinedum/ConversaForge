@@ -73,6 +73,8 @@ Any container platform works (Fly.io, Render, ECS, Kubernetes): run the same `ap
 4. Content rollback inside the product is separate: scenario "Rollback" publishes a copy of an older version as a new version; past sessions keep their exact version snapshot.
 
 ## 7. Security checklist for launch
+- Use a dedicated Redis/Valkey database per environment (staging and production must never share one: workers consume whatever jobs they see).
+- Configure SMTP before launch — email verification, invitations and password resets depend on it.
 - HTTPS only (`COOKIE_SECURE=true`), HSTS via Caddy.
 - `ALLOW_SIMULATOR=false`.
 - Strong `ENCRYPTION_KEY`/`SIGNING_SECRET`, rotated credentials for DB/Redis, Redis not exposed publicly.

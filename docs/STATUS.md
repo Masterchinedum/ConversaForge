@@ -15,20 +15,22 @@ This document separates what is **complete and verified**, what is **implemented
 
 | Gate | Result |
 |---|---|
-| Shared package tests (`pnpm --filter @cf/shared test`) | ✅ 48/48 |
-| API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 342/342 (24 suites) at integration time. See the QA and security reports for later additions. |
+| Shared package tests (`pnpm --filter @cf/shared test`) | ✅ 67/67 |
+| API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 355/355 (26 suites) |
 | Type checks (`pnpm -r typecheck`) | ✅ clean |
 | Web production build (`pnpm --filter @cf/web build`) | ✅ 47 routes |
-| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ Each workstream's journeys passed against the real API. See `docs/QA_REPORT.md` for the cross-role journeys. |
+| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md) |
+| Security review | ✅ 2 high / 5 medium / 6 low findings fixed. See [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) |
+| Dependency audit (`pnpm audit --prod`) | ✅ no known vulnerabilities |
 | Migrations from empty DB (`prisma migrate deploy`) + no drift vs schema | ✅ |
-| Docker images | see [Deployment](#deployment) |
+| Docker images (`infra/docker/*.Dockerfile`) | ✅ Both build. API container migrated an empty DB, booted healthy, and served signup/login through the web container |
 
 ## Feature status
 
 ### Foundation
 | Capability | Status | Notes |
 |---|---|---|
-| Auth (signup, login, logout, password reset, change password, login-session list/revoke) | ✅ | argon2id, httpOnly SameSite cookies, Origin check, rate limits |
+| Auth (signup, email verification, login, logout, password reset, change password, login-session list/revoke) | ✅ | argon2id, httpOnly SameSite cookies, Origin check, rate limits. Anything granted by email (grants, email enrollments, prior participant history) unlocks only after verification |
 | Personal + organization workspaces, roles (Owner/Admin/Creator/Reviewer/Member), capability checks on every route | ✅ | 404 across workspaces |
 | Invitations, members, teams, last-owner protection | ✅ | Email goes to the API log unless `SMTP_URL` is set |
 | Branding (logo, colors, display name, hide "powered by") on participant pages | ✅ | |
@@ -104,6 +106,11 @@ This document separates what is **complete and verified**, what is **implemented
 
 ## Deployment
 See [`DEPLOYMENT.md`](DEPLOYMENT.md): Docker images (`infra/docker/*.Dockerfile`), single-host compose with Caddy TLS (`infra/docker-compose.prod.yml`), migrations, monitoring (`/health`, logs, queues), backups/restore drill and rollback. Production deployment itself (a server, a domain, DNS) was not performed. It requires your hosting account.
+
+## Upgrade/deploy notes
+- **Email verification**: accounts are unverified until the user clicks the emailed link (needs `SMTP_URL`; without it the link is only logged in development). Don't bulk-backfill `emailVerifiedAt` — verification is what prevents someone from claiming another person's email-based access.
+- **One Redis DB per environment**: every API/worker process attached to a Redis DB consumes its jobs. Never point two environments at the same Redis DB.
+- Scenario variable patterns with catastrophic backtracking (e.g. nested quantifiers) are rejected by validation (ReDoS guard).
 
 ## Known limitations & recommended next steps
 1. Run the first real-provider session (above), then tune prompts with real transcripts.
