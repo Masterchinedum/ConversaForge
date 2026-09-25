@@ -128,7 +128,7 @@ export class SessionsService {
         accessTokenId: input.accessTokenId ?? null,
         enrollmentId: input.enrollmentId ?? null,
         courseItemAttemptId: input.courseItemAttemptId ?? null,
-        coachMode: !!input.coachMode && (config.coach.enabled || scenario.type === 'coaching'),
+        coachMode: !!input.coachMode,
         variables: resolved.values,
         metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
         consent: (consent ?? {}) as unknown as Prisma.InputJsonValue,

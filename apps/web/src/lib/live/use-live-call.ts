@@ -83,7 +83,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
 
   // ── Voice adapter ──
   const buildVoice = useCallback(
-    async (agentSpeaksFirst: boolean) => {
+    async (agentSpeaksFirst: boolean, replan = false) => {
       const { devices, sessionId, token } = optsRef.current;
       const config = configRef.current;
       const caps = detectCapabilities();
@@ -113,7 +113,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
       voiceRef.current = vc;
       setVoicePlan(plan);
       setVoiceMode(vc.mode);
-      if (plan.reason && vc.mode !== 'realtime') dispatch({ type: 'notice', level: 'info', message: plan.reason });
+      if (plan.reason && !replan && vc.mode !== 'realtime') dispatch({ type: 'notice', level: 'info', message: plan.reason });
       const u = voiceUnsubs.current;
       u.push(
         vc.on('partial', (text, clientTurnId) => {
@@ -161,7 +161,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
           // Re-plan on the next tick (don't tear down an adapter from inside its own callback).
           setTimeout(() => {
             if (tornDown.current || voiceRef.current !== vc) return;
-            void buildVoice(false).then(() => {
+            void buildVoice(false, true).then(() => {
               const now = voiceRef.current;
               if (now) dispatch({ type: 'notice', level: 'warning', message: `${err.message} Now using: ${modeLabel(now.mode)}.` });
             });
@@ -436,7 +436,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
     unavailable.current.add('browser_stt');
     unavailable.current.add('server_stt');
     unavailable.current.add('realtime');
-    void buildVoice(false);
+    void buildVoice(false, true);
   }, [buildVoice]);
 
   const takeOver = useCallback(() => {

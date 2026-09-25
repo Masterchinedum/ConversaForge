@@ -371,7 +371,7 @@ export function CallScreen({
             )}
           </div>
           {call.recording && call.voicePlan?.output === 'browser' && (
-            <p className="text-xs text-slate-500">Note: in browser speech mode, the recording contains your voice only; the agent’s words are in the transcript.</p>
+            <p className="text-xs text-slate-500">Note: the agent’s browser voice can’t be captured, so the recording contains your voice only; the agent’s words are in the transcript.</p>
           )}
         </div>
 

@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, EmptyState, ErrorState, Field, Loading, SimulatedBadge, Table, Td, Textarea, Th, useToast } from '@/components/ui';
+import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, EmptyState, ErrorState, Field, Loading, SimulatedBadge, Textarea, useToast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 
@@ -114,61 +114,41 @@ export function MemoryPanel({ basePath, self, onChanged }: { basePath: string; s
         {data.facts.length === 0 ? (
           <EmptyState title="Nothing remembered yet" description="Facts are learned after coaching sessions whose scenario has memory enabled." />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th>Fact</Th>
-                <Th>Type</Th>
-                <Th>From</Th>
-                <Th>Status</Th>
-                <Th className="text-right">Actions</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.facts.map((f) => (
-                <tr key={f.id} className={f.disabled ? 'opacity-60' : ''}>
-                  <Td className="max-w-md whitespace-normal">
-                    <span className="text-slate-900">{f.content}</span>
-                    {f.simulated && (
-                      <span className="ml-2">
-                        <SimulatedBadge />
-                      </span>
-                    )}
-                  </Td>
-                  <Td>
+          <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+            {data.facts.map((f) => (
+              <li key={f.id} className={`flex flex-wrap items-start justify-between gap-3 px-3 py-2 ${f.disabled ? 'opacity-60' : ''}`}>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-slate-900">{f.content}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <Badge tone={CATEGORY_TONE[f.category] ?? 'gray'}>{f.category}</Badge>
-                  </Td>
-                  <Td className="text-xs">
-                    {f.scenarioName ?? '—'}
-                    <br />
-                    <span className="text-slate-500">{formatDate(f.createdAt)}</span>
-                  </Td>
-                  <Td>{f.disabled ? <Badge>Disabled</Badge> : <Badge tone="green">Active</Badge>}</Td>
-                  <Td className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          act(() => api(`${basePath}/facts/${f.id}`, { method: 'PATCH', body: { disabled: !f.disabled } }), f.disabled ? 'Fact enabled' : 'Fact disabled')
-                        }
-                      >
-                        {f.disabled ? 'Enable' : 'Disable'}
-                      </Button>
-                      <ConfirmButton
-                        size="sm"
-                        variant="ghost"
-                        confirmText="Delete this fact permanently?"
-                        onConfirm={() => act(() => api(`${basePath}/facts/${f.id}`, { method: 'DELETE' }), 'Fact deleted')}
-                      >
-                        Delete
-                      </ConfirmButton>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+                    {f.simulated && <SimulatedBadge />}
+                    {f.disabled && <Badge>Disabled</Badge>}
+                    <span>
+                      {f.scenarioName ? `${f.scenarioName} · ` : ''}
+                      {formatDate(f.createdAt)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => act(() => api(`${basePath}/facts/${f.id}`, { method: 'PATCH', body: { disabled: !f.disabled } }), f.disabled ? 'Fact enabled' : 'Fact disabled')}
+                  >
+                    {f.disabled ? 'Enable' : 'Disable'}
+                  </Button>
+                  <ConfirmButton
+                    size="sm"
+                    variant="ghost"
+                    confirmText="Delete this fact permanently?"
+                    onConfirm={() => act(() => api(`${basePath}/facts/${f.id}`, { method: 'DELETE' }), 'Fact deleted')}
+                  >
+                    Delete
+                  </ConfirmButton>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
     </div>

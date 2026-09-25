@@ -1,5 +1,7 @@
 import { request, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export const API_URL = process.env.E2E_API_URL ?? 'http://localhost:4000';
 export const DATABASE_URL = process.env.E2E_DATABASE_URL ?? '';
@@ -11,12 +13,22 @@ const SCENARIO_NAME = process.env.E2E_SCENARIO_NAME ?? 'Behavioral interview';
 let api: APIRequestContext | null = null;
 let ctx: { workspaceId: string; scenarioId: string } | null = null;
 
+// Login is rate limited; reuse the session cookie across runs (node_modules/.cache is git-ignored).
+const AUTH_CACHE = join(__dirname, '..', 'node_modules', '.cache', 'cf-e2e', `.e2e-auth-${EMAIL.replace(/[^a-z0-9]/gi, '_')}.json`);
+
 /** Logged-in API client (seeded demo creator; see apps/api/prisma/seed.ts). */
 export async function apiClient() {
   if (api) return api;
+  if (existsSync(AUTH_CACHE)) {
+    const cached = await request.newContext({ baseURL: API_URL, storageState: AUTH_CACHE });
+    if ((await cached.get('/api/auth/me')).ok()) return (api = cached);
+    await cached.dispose();
+  }
   api = await request.newContext({ baseURL: API_URL });
   const res = await api.post('/api/auth/login', { data: { email: EMAIL, password: PASSWORD } });
   if (!res.ok()) throw new Error(`login failed: ${res.status()} ${await res.text()}`);
+  mkdirSync(dirname(AUTH_CACHE), { recursive: true });
+  await api.storageState({ path: AUTH_CACHE });
   return api;
 }
 

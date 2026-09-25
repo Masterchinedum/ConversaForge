@@ -20,7 +20,7 @@ export function Transcript({ rows, agentName, compact }: { rows: TranscriptRow[]
           const el = e.currentTarget;
           setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
         }}
-        className={clsx('overflow-y-auto rounded-lg border border-slate-200 bg-white p-3', compact ? 'h-48' : 'h-64 sm:h-80')}
+        className={clsx('overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500', compact ? 'h-48' : 'h-64 sm:h-80')}
         tabIndex={0}
         aria-label="Conversation transcript"
       >

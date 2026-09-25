@@ -140,6 +140,23 @@ test('full session: intro → consent → devices → typed turns → reconnect 
   expect(consoleErrors.filter((e) => !/Failed to load resource|favicon/i.test(e))).toEqual([]);
 });
 
+test('pause and resume', async ({ page }) => {
+  const { sessionId, sessionToken } = await createSession();
+  await page.goto(`/live/${sessionId}#t=${sessionToken}`);
+  await joinCall(page, { recordAudio: true });
+  await expect(page.getByTestId('recording-indicator')).toBeVisible();
+  await page.getByRole('button', { name: /Pause/ }).click();
+  await expect(page.getByTestId('call-status')).toHaveText('Paused');
+  await expect(page.getByTestId('typed-input')).toBeDisabled();
+  // The recording indicator only shows while actually recording.
+  await expect(page.getByTestId('recording-indicator')).toHaveCount(0);
+  if (DATABASE_URL) await expect.poll(() => sql(`select state from "Session" where id = '${sessionId}'`)).toBe('PAUSED');
+  await page.getByRole('button', { name: /Resume/ }).click();
+  await expect(page.getByTestId('call-status')).toHaveText('Live');
+  await expect(page.getByTestId('recording-indicator')).toBeVisible();
+  await expect(page.getByTestId('typed-input')).toBeEnabled();
+});
+
 test('declining recording still allows the call and nothing is recorded', async ({ page }) => {
   const { sessionId, sessionToken } = await createSession();
   await page.goto(`/live/${sessionId}#t=${sessionToken}`);

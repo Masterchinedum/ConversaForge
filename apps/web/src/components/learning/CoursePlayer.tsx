@@ -65,10 +65,11 @@ export function CoursePlayer({
   const stopPlayAll = useCallback(() => router.replace(pagePath), [router, pagePath]);
 
   const openContent = useCallback(
-    async (item: PlayerItem, content?: ItemContent | null) => {
+    async (item: PlayerItem, content?: ItemContent | null, auto = false) => {
       const c = content ?? (await api<ItemContent>(`${apiBase}/items/${item.id}/content`));
       if (!c) return;
-      if (item.kind === 'LINK') window.open(c.url, '_blank', 'noopener,noreferrer');
+      // Only open a new tab on a real click (automatic Play All steps would be popup-blocked).
+      if (item.kind === 'LINK' && !auto) window.open(c.url, '_blank', 'noopener,noreferrer');
       setViewer({ item, content: c });
     },
     [apiBase],
@@ -84,7 +85,7 @@ export function CoursePlayer({
           return;
         }
         await mutate();
-        await openContent(item, r.content);
+        await openContent(item, r.content, !!opts.playAll);
       } catch (e) {
         toast.error(errorMessage(e));
         if (opts.playAll) setPaused(errorMessage(e));
@@ -315,7 +316,7 @@ export function CoursePlayer({
                     )}
                     {last?.score != null && <p className="mt-1 text-xs text-slate-600">Last score: {Math.round(last.score)}</p>}
                   </div>
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="ml-auto flex flex-col items-end gap-2">
                     <Badge tone={st.tone}>{st.label}</Badge>
                     {enrollment && !item.locked && (
                       <div className="flex flex-wrap justify-end gap-2">
@@ -446,7 +447,7 @@ function ContentView({ item, content }: { item: PlayerItem; content: ItemContent
   }
   return (
     <div className="space-y-2 text-sm">
-      <p>The link opened in a new tab. When you are done, mark it as viewed.</p>
+      <p>Open the link (new tab). When you are done, mark it as viewed.</p>
       <a href={content.url} target="_blank" rel="noopener noreferrer" className="break-all text-brand-700 hover:underline">
         {content.url} ↗
       </a>

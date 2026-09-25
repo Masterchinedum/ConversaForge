@@ -288,7 +288,7 @@ export class SessionEngine {
       }
       await this.sendWelcome(opts.lastSeq, resumed);
       if (this.currentState === 'ACTIVE' && !this.realtime && this.needsResponse()) {
-        this.scheduleGeneration({ kind: 'participant_turn' });
+        await this.scheduleGeneration({ kind: 'participant_turn' });
       }
       return conn;
     });
@@ -351,7 +351,7 @@ export class SessionEngine {
     this.participantSpeaking = false;
     await this.logEvent('connection.detached', { reason });
     if (this.terminal) return;
-    if (this.gen) this.abortGeneration('disconnect');
+    if (this.gen) await this.abortGeneration('disconnect');
     const st = this.currentState;
     if (st === 'ACTIVE' || st === 'PAUSED' || st === 'CONNECTING') {
       this.wasPausedBeforeDisconnect = st === 'PAUSED';
@@ -478,7 +478,7 @@ export class SessionEngine {
         this.pendingBargeIn = true;
         this.clearFalseBargeIn();
         await this.logEvent('agent.barge_in', { turnId: this.gen.turnId });
-        this.abortGeneration('barge_in');
+        await this.abortGeneration('barge_in');
       }
       return;
     }
@@ -492,7 +492,7 @@ export class SessionEngine {
           if (!this.pendingBargeIn || this.participantBusy() || this.gen || this.currentState !== 'ACTIVE') return;
           this.pendingBargeIn = false;
           await this.logEvent('agent.false_barge_in', {});
-          this.scheduleGeneration({ kind: 'false_barge_in' });
+          await this.scheduleGeneration({ kind: 'false_barge_in' });
         });
       }, wait);
     }
@@ -554,12 +554,12 @@ export class SessionEngine {
     if (this.deferredClose) {
       const d = this.deferredClose;
       this.deferredClose = null;
-      await this.closeSession(d.reason, d.by);
+      await this.closeSessionNow(d.reason, d.by);
       return;
     }
     this.flushDeferred();
     if (this.realtime) return; // the realtime model replies on its own
-    this.scheduleGeneration({ kind: 'participant_turn' });
+    await this.scheduleGeneration({ kind: 'participant_turn' });
   }
 
   private async onPlayback(msg: Extract<ClientMessage, { type: 'agent.playback' }>) {
@@ -605,7 +605,7 @@ export class SessionEngine {
     switch (action) {
       case 'pause':
         if (st !== 'ACTIVE') return this.error('invalid_state', 'Only an active session can be paused');
-        if (this.gen) this.abortGeneration('paused');
+        if (this.gen) await this.abortGeneration('paused');
         this.state.pausedAt = new Date().toISOString();
         await this.transition('PAUSED', 'participant_paused');
         return;
@@ -620,7 +620,7 @@ export class SessionEngine {
           return this.error('not_allowed', 'This session cannot be ended early');
         }
         await this.logEvent('control.end', { state: st });
-        await this.closeSession('participant_ended', 'participant');
+        await this.closeSessionNow('participant_ended', 'participant');
         return;
       case 'mute':
       case 'unmute':
@@ -732,7 +732,7 @@ export class SessionEngine {
       return;
     }
     if (this.participantBusy()) return; // their spoken turn will trigger the reply (history includes this)
-    this.scheduleGeneration({ kind });
+    await this.scheduleGeneration({ kind });
   }
 
   // ───────────────────────────── realtime mode mirrors ─────────────────────────────
@@ -777,7 +777,7 @@ export class SessionEngine {
     if (turn && speaker === 'PARTICIPANT' && this.deferredClose) {
       const d = this.deferredClose;
       this.deferredClose = null;
-      await this.closeSession(d.reason, d.by);
+      await this.closeSessionNow(d.reason, d.by);
     }
   }
 
@@ -846,7 +846,27 @@ export class SessionEngine {
     return this.stablePrompt;
   }
 
-  async dynamicSystemPrompt(): Promise<string> {
+  /** Automatic knowledge retrieval for the latest participant utterance (config.knowledge.autoRetrieve). */
+  private async autoRetrieve(trigger: GenerationTrigger) {
+    const k = this.config.knowledge;
+    if (!k.autoRetrieve || !k.documentIds.length || trigger.kind !== 'participant_turn') return [];
+    const svc = this.deps.optional.knowledge();
+    const last = [...this.turns].reverse().find((t) => t.speaker === 'PARTICIPANT');
+    if (!svc || !last || last.text.trim().split(/\s+/).length < 3) return [];
+    try {
+      const hits = await Promise.race([
+        svc.search(this.session.workspaceId, k.documentIds, last.text.slice(0, 300), Math.min(k.topK, 3)),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('knowledge search timeout')), 1500)),
+      ]);
+      if (hits.length) await this.logEvent('knowledge.auto_retrieve', { turnSeq: last.seq, hits: hits.map((h) => ({ documentId: h.documentId, chunkId: h.chunkId, score: h.score })) });
+      return hits;
+    } catch (e) {
+      this.logger.warn(`auto-retrieve failed: ${(e as Error).message}`);
+      return [];
+    }
+  }
+
+  async dynamicSystemPrompt(retrieved: Array<{ documentTitle: string; page: number | null; heading: string | null; text: string }> = []): Promise<string> {
     if (this.memoryFacts === null) {
       this.memoryFacts = [];
       if (this.config.memory.enabled && this.config.memory.maxFactsInPrompt > 0) {
@@ -877,12 +897,15 @@ export class SessionEngine {
       state: this.state,
       notepad: notepad ? String(notepad.data?.content ?? '') : null,
       realtime: this.realtime,
+      retrieved,
     });
   }
 
-  private scheduleGeneration(trigger: GenerationTrigger) {
+  /** Start a model reply (must run inside the engine queue). */
+  private async scheduleGeneration(trigger: GenerationTrigger) {
     if (this.terminal || this.currentState !== 'ACTIVE') return;
-    if (this.gen) this.abortGeneration('superseded');
+    if (this.gen) await this.abortGeneration('superseded');
+    if (this.terminal || this.currentState !== 'ACTIVE') return;
     const g: Generation = {
       turnId: randomUUID(),
       abort: new AbortController(),
@@ -897,14 +920,15 @@ export class SessionEngine {
     void this.generate(g).catch((e) => this.logger.error(`generation crashed: ${(e as Error)?.stack ?? e}`));
   }
 
-  private abortGeneration(reason: string) {
+  /** Abort the in-flight generation (must run inside the engine queue) and commit what was streamed. */
+  private async abortGeneration(reason: string) {
     const g = this.gen;
     if (!g) return;
     g.abortedReason = reason;
     g.abort.abort();
     this.gen = null;
     // Commit what was already streamed (the participant may have heard part of it), unless disconnected.
-    void this.run(() => this.commitAborted(g));
+    await this.commitAborted(g);
   }
 
   private async commitAborted(g: Generation) {
@@ -952,7 +976,7 @@ export class SessionEngine {
     }
     const toolset = await this.ensureToolset();
     const system = await this.stableSystemPrompt();
-    const systemDynamic = await this.dynamicSystemPrompt();
+    const systemDynamic = await this.dynamicSystemPrompt(await this.autoRetrieve(g.trigger));
     if (this.gen !== g) return;
     const messages: LlmMessage[] = buildHistory(this.turns, g.trigger);
     const outcomes: Array<{ name: string; out: ToolOutcome }> = [];
@@ -1219,15 +1243,23 @@ export class SessionEngine {
     if (!this.transport) await this.complete();
   }
 
-  /** Graceful close initiated by the participant, a timer or the system. */
-  async closeSession(reason: string, endedBy: string) {
+  /**
+   * Graceful close initiated from outside the engine (e.g. phone hang-up, transfer, admin): the agent
+   * speaks the closing line if someone is still connected, then ENDING → COMPLETED.
+   */
+  closeSession(reason: string, endedBy: string) {
+    return this.run(() => this.closeSessionNow(reason, endedBy));
+  }
+
+  /** Graceful close (must run inside the engine queue). */
+  private async closeSessionNow(reason: string, endedBy: string) {
     if (this.terminal || this.currentState === 'ENDING') return;
     const st = this.currentState;
     if (st === 'CREATED' || st === 'READY') {
       await this.transition('CANCELLED', reason, { endedBy });
       return;
     }
-    if (this.gen) this.abortGeneration('closing');
+    if (this.gen) await this.abortGeneration('closing');
     this.deferredClose = null;
     this.state.endRequested = { reason, by: endedBy, closingTurnId: null };
     this.state.phase = 'closing';
@@ -1509,7 +1541,7 @@ export class SessionEngine {
       if (!this.gen || now >= this.deferredClose.until) {
         const d = this.deferredClose;
         this.deferredClose = null;
-        await this.closeSession(d.reason, d.by);
+        await this.closeSessionNow(d.reason, d.by);
         return;
       }
     }
@@ -1524,7 +1556,7 @@ export class SessionEngine {
       if (lastTurn?.speaker === 'AGENT' && !timerRunning && now >= this.agentBusyUntil && now - since >= silenceMs) {
         this.silenceFired = true;
         await this.logEvent('silence.check_in', { silentMs: now - since });
-        this.scheduleGeneration({ kind: 'silence_check_in', silentMs: now - since });
+        await this.scheduleGeneration({ kind: 'silence_check_in', silentMs: now - since });
       }
     }
   }

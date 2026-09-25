@@ -132,7 +132,14 @@ test('browser speech: thinking pauses are not cut off; silence, "I’m done" and
   await page.getByRole('button', { name: /I’m done answering/ }).click();
   await expect(participantSaved(page)).toHaveCount(3, { timeout: 5000 });
 
-  // 6) Push-to-talk: recognition only runs while held; release commits immediately.
+  // 6) Mute stops recognition (and disables the mic track); unmute restarts it.
+  await page.getByRole('button', { name: /Mute/ }).click();
+  await expect(page.getByRole('button', { name: /Unmute/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => !!(window as any).__sr?.running)).toBe(false);
+  await page.getByRole('button', { name: /Unmute/ }).click();
+  await expect.poll(() => page.evaluate(() => !!(window as any).__sr?.running)).toBe(true);
+
+  // 7) Push-to-talk: recognition only runs while held; release commits immediately.
   await page.getByLabel('Push to talk').check();
   await expect.poll(() => page.evaluate(() => !!(window as any).__sr?.running)).toBe(false);
   const talk = page.getByRole('button', { name: 'Hold to talk' });

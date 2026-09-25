@@ -747,4 +747,78 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       server.close();
     }
   });
+  it('repeated provider failures end the session as FAILED with an error code; non-fatal errors before that', async () => {
+    let calls = 0;
+    const server: Server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        calls++;
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'simulated provider failure' } }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const prevBase = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as any).port}`;
+    try {
+      const fx = await createWorkspaceFixture(prisma as any);
+      await prisma.providerConnection.create({
+        data: { workspaceId: fx.workspace.id, provider: 'anthropic', kind: 'LLM', encryptedSecret: app.get(CryptoService).encrypt('sk-ant-test') },
+      });
+      const { scenario } = await publishScenario(prisma as any, fx.workspace.id, interviewConfig());
+      const created = (await (
+        await fetch(`${base}/api/workspaces/${fx.workspace.id}/scenarios/${scenario.id}/sessions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${fx.cookieToken}`, 'content-type': 'application/json' },
+          body: '{}',
+        })
+      ).json()) as any;
+      const s = { sessionId: created.sessionId, sessionToken: created.sessionToken };
+      await consent(s);
+      const { c } = await connect(s);
+      c.send({ type: 'start' });
+      await agentReply(c);
+      for (let i = 1; i <= 2; i++) {
+        await say(c, `attempt ${i}`);
+        const e = await c.next('error');
+        expect(e).toMatchObject({ code: 'llm_error', fatal: false });
+      }
+      await say(c, 'attempt 3');
+      const fatal = await c.next('error', (m) => m.fatal);
+      expect(fatal.code).toBe('llm_unavailable');
+      await c.next('state', (m) => m.state === 'FAILED');
+      const row = await prisma.session.findUniqueOrThrow({ where: { id: s.sessionId } });
+      expect(row.errorCode).toBe('llm_unavailable');
+      expect(await prisma.sessionEvent.count({ where: { sessionId: s.sessionId, type: 'provider.error' } })).toBe(3);
+      expect(calls).toBe(3);
+    } finally {
+      if (prevBase === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = prevBase;
+      server.close();
+    }
+  });
+
+  it('the sweeper abandons orphaned live sessions and expires never-started ones', async () => {
+    const runtime = app.get(RuntimeService);
+    const a = await newSession();
+    await consent(a);
+    const { c } = await connect(a);
+    c.send({ type: 'start' });
+    await agentReply(c);
+    // Simulate the API process dying: engine gone, DB still ACTIVE, heartbeat stale.
+    (c as any).ws.removeAllListeners('close');
+    runtime.peek(a.sessionId)!.dispose();
+    c.ws.terminate();
+    await prisma.$executeRawUnsafe(`UPDATE "Session" SET "updatedAt" = now() - interval '10 minutes' WHERE id = $1`, a.sessionId);
+    const b = await newSession();
+    await prisma.$executeRawUnsafe(`UPDATE "Session" SET "createdAt" = now() - interval '2 days' WHERE id = $1`, b.sessionId);
+    await runtime.sweep();
+    const ra = await prisma.session.findUniqueOrThrow({ where: { id: a.sessionId } });
+    const rb = await prisma.session.findUniqueOrThrow({ where: { id: b.sessionId } });
+    expect(ra.state).toBe('ABANDONED');
+    expect(ra.endedBy).toBe('system');
+    expect(rb.state).toBe('EXPIRED');
+    await eventually(async () => expect(await prisma.usageLedger.count({ where: { sessionId: a.sessionId, kind: 'SESSION_SECONDS' } })).toBe(1));
+    await eventually(async () => expect(terminalEvents.some((e) => e.sessionId === a.sessionId && e.state === 'ABANDONED')).toBe(true));
+  });
 });
