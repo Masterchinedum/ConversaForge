@@ -4,14 +4,18 @@ import { env } from '../../config/env';
 import { CryptoService } from '../crypto/crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnthropicProvider } from './anthropic.provider';
+import { GoogleProvider } from './google.provider';
 import { OpenAIProvider } from './openai.provider';
 import { SimulatorProvider } from './simulator.provider';
 import { LlmUnavailableError, type LlmPurpose, type ResolvedLlm } from './llm.types';
 
+type RealLlmProvider = Exclude<LlmProviderId, 'simulator'>;
+
 /**
  * Resolves which language model to use for a workspace + purpose:
  *   1. workspace ProviderConnection (BYO key, encrypted at rest), preferred provider first
- *   2. server environment key (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+ *   2. server environment key (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY)
+ * Provider order: the preferred provider first, then anthropic → openai → google.
  *   3. local development simulator (only when ALLOW_SIMULATOR is not "false")
  */
 @Injectable()
@@ -26,8 +30,8 @@ export class LlmService {
 
   async resolve(workspaceId: string, purpose: LlmPurpose, preferred?: LlmProviderId | null, modelOverride?: string | null): Promise<ResolvedLlm> {
     if (preferred === 'simulator') return this.simulatorResolved();
-    const order: Array<'anthropic' | 'openai'> =
-      preferred === 'openai' ? ['openai', 'anthropic'] : ['anthropic', 'openai'];
+    const base: RealLlmProvider[] = ['anthropic', 'openai', 'google'];
+    const order: RealLlmProvider[] = preferred && preferred !== 'anthropic' ? [preferred, ...base.filter((p) => p !== preferred)] : base;
 
     const connections = await this.prisma.providerConnection.findMany({
       where: { workspaceId, kind: 'LLM', status: 'ACTIVE', revokedAt: null, provider: { in: order } },
@@ -46,17 +50,18 @@ export class LlmService {
           this.logger.error(`Could not decrypt provider connection ${conn.id}: ${e?.message}`);
         }
       }
-      if (!key) key = provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY;
+      if (!key) key = this.envKey(provider);
       if (!key) continue;
       const cfgModel = (conn?.config as any)?.[purpose === 'live' ? 'liveModel' : 'analysisModel'] as string | undefined;
       const model = (preferred === provider && modelOverride) || cfgModel || this.defaultModel(provider, purpose);
-      const instance = provider === 'anthropic' ? new AnthropicProvider(key) : new OpenAIProvider(key);
+      const instance =
+        provider === 'anthropic' ? new AnthropicProvider(key) : provider === 'openai' ? new OpenAIProvider(key) : new GoogleProvider(key);
       return { provider: instance, model, simulated: false, source };
     }
 
     if (env.ALLOW_SIMULATOR) return this.simulatorResolved();
     throw new LlmUnavailableError(
-      'No AI provider is configured. Add an Anthropic or OpenAI key in Settings → AI providers, or set ANTHROPIC_API_KEY on the server.',
+      'No AI provider is configured. Add an Anthropic, OpenAI or Google Gemini key in Settings → AI providers, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY on the server.',
     );
   }
 
@@ -64,9 +69,16 @@ export class LlmService {
     return { provider: this.simulator, model: 'local-simulator', simulated: true, source: 'simulator' };
   }
 
-  defaultModel(provider: 'anthropic' | 'openai', purpose: LlmPurpose): string {
+  defaultModel(provider: RealLlmProvider, purpose: LlmPurpose): string {
     if (provider === 'anthropic') return purpose === 'live' ? env.ANTHROPIC_LIVE_MODEL : env.ANTHROPIC_ANALYSIS_MODEL;
+    if (provider === 'google') return purpose === 'live' ? env.GEMINI_TEXT_MODEL : env.GEMINI_ANALYSIS_MODEL;
     return purpose === 'live' ? env.OPENAI_LIVE_MODEL : env.OPENAI_ANALYSIS_MODEL;
+  }
+
+  private envKey(provider: RealLlmProvider): string | undefined {
+    if (provider === 'anthropic') return env.ANTHROPIC_API_KEY;
+    if (provider === 'google') return env.GEMINI_API_KEY;
+    return env.OPENAI_API_KEY;
   }
 
   /** Which real providers are available (for UI status pages). */
@@ -79,6 +91,7 @@ export class LlmService {
     return {
       anthropic: has('anthropic') || !!env.ANTHROPIC_API_KEY,
       openai: has('openai') || !!env.OPENAI_API_KEY,
+      google: has('google') || !!env.GEMINI_API_KEY,
       deepgram: has('deepgram') || !!env.DEEPGRAM_API_KEY,
       elevenlabs: has('elevenlabs') || !!env.ELEVENLABS_API_KEY,
       twilio: has('twilio') || !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN),
@@ -87,11 +100,22 @@ export class LlmService {
     };
   }
 
-  /** Decrypted secret for a non-LLM provider (openai realtime/tts/stt, deepgram, elevenlabs, twilio, recall). */
-  async providerSecret(workspaceId: string, provider: string): Promise<{ secret: string; config: Record<string, unknown>; source: 'workspace' | 'environment' } | null> {
-    const conn = await this.prisma.providerConnection.findFirst({
+  /** Decrypted secret for a non-LLM use (openai/google live voice, openai tts/stt, deepgram, elevenlabs, twilio, recall). */
+  async providerSecret(
+    workspaceId: string,
+    provider: string,
+    /** When set, a workspace connection whose `config.capabilities` excludes it is skipped (env key still applies). */
+    capability?: string,
+  ): Promise<{ secret: string; config: Record<string, unknown>; source: 'workspace' | 'environment' } | null> {
+    const conns = await this.prisma.providerConnection.findMany({
       where: { workspaceId, provider, status: 'ACTIVE', revokedAt: null },
       orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+    const conn = conns.find((c) => {
+      if (!capability) return true;
+      const caps = (c.config as { capabilities?: unknown } | null)?.capabilities;
+      return !Array.isArray(caps) || caps.length === 0 || caps.includes(capability);
     });
     if (conn) {
       try {
@@ -115,6 +139,7 @@ export class LlmService {
     const envMap: Record<string, string | undefined> = {
       openai: env.OPENAI_API_KEY,
       anthropic: env.ANTHROPIC_API_KEY,
+      google: env.GEMINI_API_KEY,
       deepgram: env.DEEPGRAM_API_KEY,
       elevenlabs: env.ELEVENLABS_API_KEY,
       recall: env.RECALL_API_KEY,

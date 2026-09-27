@@ -56,6 +56,17 @@ const EnvSchema = z.object({
   OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime'),
   OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
   OPENAI_STT_MODEL: z.string().default('gpt-4o-mini-transcribe'),
+  /** Google Gemini Developer API key (GOOGLE_API_KEY accepted as an alias; see loadEnv). */
+  GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_API_KEY: z.string().optional(),
+  /** Gemini Live (speech-to-speech) model used with ephemeral tokens in the browser. */
+  GEMINI_LIVE_MODEL: z.string().default('gemini-2.5-flash-native-audio-latest'),
+  /** Gemini text model for live conversations in pipeline mode. */
+  GEMINI_TEXT_MODEL: z.string().default('gemini-2.5-flash'),
+  /** Gemini text model for analysis / drafting assistant / coach memory. */
+  GEMINI_ANALYSIS_MODEL: z.string().default('gemini-2.5-pro'),
+  /** Optional Gemini API base URL override (proxies, tests). */
+  GEMINI_BASE_URL: z.string().url().optional().or(z.literal('').transform(() => undefined)),
   DEEPGRAM_API_KEY: z.string().optional(),
   ELEVENLABS_API_KEY: z.string().optional(),
   /**
@@ -115,6 +126,9 @@ export function loadEnv(): Env {
     throw new Error(`Invalid environment configuration:\n${msg}`);
   }
   cached = parsed.data;
+  // GOOGLE_API_KEY is an accepted alias for GEMINI_API_KEY (the name Google's SDKs also read).
+  if (!cached.GEMINI_API_KEY && cached.GOOGLE_API_KEY) cached.GEMINI_API_KEY = cached.GOOGLE_API_KEY;
+  if (!cached.GEMINI_API_KEY) cached.GEMINI_API_KEY = undefined;
   return cached;
 }
 

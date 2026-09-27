@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Channel, ScenarioConfig, SttProviderId, TtsProviderId } from '@cf/shared';
+import type { Channel, RealtimeProviderChoice, RealtimeProviderId, ScenarioConfig, SttProviderId, TtsProviderId } from '@cf/shared';
 import { env } from '../../../config/env';
 import { LlmService } from '../../../common/llm/llm.service';
 import { LlmUnavailableError, type ResolvedLlm } from '../../../common/llm/llm.types';
@@ -33,30 +33,54 @@ export class ProviderResolverService {
     try {
       llm = await this.resolveLlm(workspaceId, config);
     } catch (e) {
-      if (e instanceof LlmUnavailableError) throw Errors.unavailable(e.message, { missing: 'ANTHROPIC_API_KEY or OPENAI_API_KEY' });
+      if (e instanceof LlmUnavailableError) throw Errors.unavailable(e.message, { missing: 'ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY' });
       throw e;
     }
     if (llm.simulated && opts.workspaceSettings?.allowSimulator === false && config.model.llmProvider !== 'simulator') {
       throw Errors.unavailable(
-        'No AI provider is configured for this workspace and the local simulator is disabled. Add an Anthropic or OpenAI key.',
-        { missing: 'ANTHROPIC_API_KEY or OPENAI_API_KEY' },
+        'No AI provider is configured for this workspace and the local simulator is disabled. Add an Anthropic, OpenAI or Google Gemini key.',
+        { missing: 'ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY' },
       );
     }
 
     const fallbacks: string[] = [];
     const openai = !!(await this.llm.providerSecret(workspaceId, 'openai'));
+    // Live voice honours the connection's capability checkboxes (Settings → AI providers).
+    const openaiSecret = await this.llm.providerSecret(workspaceId, 'openai', 'REALTIME');
+    const googleSecret = await this.llm.providerSecret(workspaceId, 'google', 'REALTIME');
     const deepgram = !!(await this.llm.providerSecret(workspaceId, 'deepgram'));
     const elevenlabs = !!(await this.llm.providerSecret(workspaceId, 'elevenlabs'));
     const isPhone = opts.channel === 'PHONE_INBOUND' || opts.channel === 'PHONE_OUTBOUND' || opts.channel === 'MEETING';
 
     let voiceMode = config.model.voiceMode;
+    const requestedLive: RealtimeProviderChoice = config.model.realtimeProvider ?? 'auto';
+    let realtime: ProviderInfo['realtime'];
     if (voiceMode === 'realtime') {
-      if (!openai) {
+      if (isPhone) {
         voiceMode = 'pipeline';
-        fallbacks.push('OpenAI Realtime was requested but no OpenAI key is configured (OPENAI_API_KEY or a workspace OpenAI connection); using the speech pipeline instead.');
-      } else if (isPhone) {
-        voiceMode = 'pipeline';
-        fallbacks.push('Realtime (WebRTC) voice is browser-only; phone/meeting channels use the speech pipeline.');
+        fallbacks.push('Live speech-to-speech voice runs in the browser only; phone/meeting channels use the speech pipeline.');
+      } else {
+        const pick = pickLiveProvider(requestedLive, { openai: openaiSecret, google: googleSecret });
+        if (!pick.provider) {
+          voiceMode = 'pipeline';
+          fallbacks.push(
+            requestedLive === 'auto'
+              ? 'Live voice unavailable: no live-model key is configured (OPENAI_API_KEY or GEMINI_API_KEY, or a workspace OpenAI/Google connection); using the speech pipeline instead.'
+              : `${LIVE_NAMES[requestedLive]} was requested but no ${requestedLive === 'openai' ? 'OpenAI key (OPENAI_API_KEY' : 'Google key (GEMINI_API_KEY'} or a workspace connection) is configured, and no other live provider is available; using the speech pipeline instead.`,
+          );
+        } else {
+          if (requestedLive !== 'auto' && pick.provider !== requestedLive) {
+            fallbacks.push(
+              `${LIVE_NAMES[requestedLive]} was requested but no ${requestedLive === 'openai' ? 'OpenAI key (OPENAI_API_KEY' : 'Google key (GEMINI_API_KEY'} or a workspace connection) is configured; using ${LIVE_NAMES[pick.provider]} instead.`,
+            );
+          }
+          const secret = pick.provider === 'openai' ? openaiSecret : googleSecret;
+          realtime = {
+            provider: pick.provider,
+            model: liveModel(pick.provider, config.model.realtimeModel, requestedLive, secret?.config),
+            source: secret!.source,
+          };
+        }
       }
     }
 
@@ -91,12 +115,43 @@ export class ProviderResolverService {
       llm: { provider: llm.provider.id, model: llm.model, source: llm.source },
       stt,
       tts,
-      ...(voiceMode === 'realtime'
-        ? { realtime: { provider: 'openai' as const, model: config.model.realtimeModel || env.OPENAI_REALTIME_MODEL } }
-        : {}),
+      ...(voiceMode === 'realtime' && realtime ? { realtime } : {}),
+      ...(config.model.voiceMode === 'realtime' ? { requestedRealtimeProvider: requestedLive } : {}),
       simulated: simulatedParts.length > 0,
       simulatedParts,
       fallbacks,
     };
   }
+}
+
+export const LIVE_NAMES: Record<RealtimeProviderId, string> = { openai: 'OpenAI Realtime', google: 'Google Gemini Live' };
+/** 'auto' order (documented in the scenario schema): OpenAI first, then Google. */
+export const LIVE_AUTO_ORDER: RealtimeProviderId[] = ['openai', 'google'];
+
+/** Preferred live provider if configured, otherwise the other one; null when neither has a credential. */
+export function pickLiveProvider(
+  requested: RealtimeProviderChoice,
+  available: Record<RealtimeProviderId, unknown>,
+): { provider: RealtimeProviderId | null } {
+  const order = requested === 'auto' ? LIVE_AUTO_ORDER : [requested, ...LIVE_AUTO_ORDER.filter((p) => p !== requested)];
+  return { provider: order.find((p) => !!available[p]) ?? null };
+}
+
+function looksLikeGemini(model: string) {
+  const m = model.toLowerCase();
+  return m.startsWith('gemini') || m.startsWith('models/gemini');
+}
+
+/**
+ * Model for the chosen live provider: the scenario override when it belongs to that provider (an override
+ * written for the other provider is ignored after a fallback), then the workspace connection's
+ * `realtimeModel`, then the server default.
+ */
+export function liveModel(provider: RealtimeProviderId, override: string, requested: RealtimeProviderChoice, connConfig?: Record<string, unknown>): string {
+  const o = (override ?? '').trim();
+  const fits = o && (provider === 'google' ? looksLikeGemini(o) : !looksLikeGemini(o));
+  if (fits && (requested === 'auto' || requested === provider)) return o;
+  const cfg = typeof connConfig?.realtimeModel === 'string' ? (connConfig.realtimeModel as string) : '';
+  if (cfg) return cfg;
+  return provider === 'google' ? env.GEMINI_LIVE_MODEL : env.OPENAI_REALTIME_MODEL;
 }

@@ -111,6 +111,45 @@ d('ProvidersService (integration)', () => {
     await expect(ctx.providers.verify(ws.id, ctx.principal, conn.id)).rejects.toMatchObject({ status: 410 });
   });
 
+  it('Google Gemini: LLM + live voice capabilities, verified via models.list with x-goog-api-key, blocked networks handled', async () => {
+    const g = await ctx.workspace('Goog');
+    try {
+      const KEY = 'AIzaSyFAKE-google-key-000000000000000';
+      const bad = fakeFetch(400, JSON.stringify({ error: { code: 400, message: `API key not valid. Please pass a valid API key. ${KEY}`, status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } }));
+      ctx.providers.fetchImpl = bad;
+      const created = await ctx.providers.create(g.id, ctx.principal, { provider: 'google', secret: KEY, config: { liveModel: 'gemini-2.5-flash' }, verify: true });
+      expect(bad.calls[0]).toMatchObject({ url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', headers: { 'x-goog-api-key': KEY } });
+      expect(bad.calls[0]!.url).not.toContain(KEY);
+      expect(created.verification).toMatchObject({ result: 'invalid', httpStatus: 400 });
+      expect(created.verification!.message).not.toContain(KEY);
+      expect(created.connection).toMatchObject({ provider: 'google', kind: 'LLM', capabilities: ['LLM', 'REALTIME'], status: 'INVALID' });
+
+      // A proxy/firewall 403 (non-JSON) is a network problem, not a bad key.
+      ctx.providers.fetchImpl = fakeFetch(403, 'Forbidden by proxy');
+      const blocked = await ctx.providers.verify(g.id, ctx.principal, created.connection.id);
+      expect(blocked.verification).toMatchObject({ result: 'error', httpStatus: 403 });
+      expect(blocked.verification.message).toMatch(/blocked before reaching the provider/);
+
+      ctx.providers.fetchImpl = fakeFetch(200, '{"models":[{"name":"models/gemini-2.5-flash"}]}');
+      const ok = await ctx.providers.verify(g.id, ctx.principal, created.connection.id);
+      expect(ok.connection.status).toBe('ACTIVE');
+      expect(await ctx.llm.availability(g.id)).toMatchObject({ google: true });
+      const r = await ctx.llm.resolve(g.id, 'analysis');
+      expect(r).toMatchObject({ simulated: false, source: 'workspace' });
+      expect(r.provider.id).toBe('google');
+      expect((await ctx.llm.providerSecret(g.id, 'google', 'REALTIME'))?.secret).toBe(KEY);
+      const st = await ctx.providers.status(g.id);
+      expect(st.capabilities.find((c) => c.key === 'live_llm')).toMatchObject({ source: 'workspace', provider: 'google', model: 'gemini-2.5-flash' });
+      const live = st.capabilities.find((c) => c.key === 'realtime_voice')!;
+      expect(live).toMatchObject({ source: 'workspace', provider: 'google' });
+      expect(live.message).toMatch(/Google Gemini Live/);
+    } finally {
+      await ctx.prisma.providerConnection.deleteMany({ where: { workspaceId: g.id } });
+      await ctx.prisma.auditLog.deleteMany({ where: { workspaceId: g.id } }).catch(() => undefined);
+      await ctx.prisma.workspace.deleteMany({ where: { id: g.id } }).catch(() => undefined);
+    }
+  });
+
   it('stores OpenAI with multiple capabilities and Twilio as encrypted JSON exposed as sid:token', async () => {
     ctx.providers.fetchImpl = fakeFetch(200);
     const oa = await ctx.providers.create(ws.id, ctx.principal, { provider: 'openai', secret: 'sk-proj-FAKEFAKEFAKEFAKE1234', config: { realtimeModel: 'gpt-realtime', liveModel: 'gpt-4.1-mini' }, verify: true });

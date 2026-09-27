@@ -750,6 +750,114 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       server.close();
     }
   });
+  it('realtime mode (Google Gemini Live, auto): ephemeral token minted server-side with the locked setup; transcripts/tools mirrored identically', async () => {
+    const bodies: any[] = [];
+    const server: Server = createServer((req, res) => {
+      let data = '';
+      req.on('data', (c) => (data += c));
+      req.on('end', () => {
+        bodies.push({ path: req.url, key: req.headers['x-goog-api-key'], body: JSON.parse(data || '{}') });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ name: `auth_tokens/eph-${bodies.length}` }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const prev = process.env.GEMINI_BASE_URL;
+    process.env.GEMINI_BASE_URL = `http://127.0.0.1:${(server.address() as any).port}`;
+    try {
+      const fx = await createWorkspaceFixture(prisma as any);
+      await prisma.providerConnection.create({
+        data: { workspaceId: fx.workspace.id, provider: 'google', kind: 'LLM', config: { capabilities: ['LLM', 'REALTIME'] }, encryptedSecret: app.get(CryptoService).encrypt('AIza-google-test-key') },
+      });
+      // Defaults: voiceMode realtime + realtimeProvider auto → Google is the only configured live provider.
+      const ic = interviewConfig();
+      const cfg = { ...ic, model: { ...ic.model, voiceMode: 'realtime' as const, realtimeProvider: 'auto' as const, llmProvider: 'anthropic' as const } };
+      const { scenario } = await publishScenario(prisma as any, fx.workspace.id, cfg);
+      const created = (await (
+        await fetch(`${base}/api/workspaces/${fx.workspace.id}/scenarios/${scenario.id}/sessions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${fx.cookieToken}`, 'content-type': 'application/json' },
+          body: '{}',
+        })
+      ).json()) as any;
+      const s = { sessionId: created.sessionId, sessionToken: created.sessionToken };
+      const row = await prisma.session.findUniqueOrThrow({ where: { id: s.sessionId } });
+      expect(row.providerInfo).toMatchObject({ voiceMode: 'realtime', realtime: { provider: 'google', model: 'gemini-2.5-flash-native-audio-latest' }, requestedRealtimeProvider: 'auto' });
+      // Anthropic preferred for text but absent → the Google key also serves the text LLM (fallback order).
+      expect((row.providerInfo as any).llm).toMatchObject({ provider: 'google', model: 'gemini-2.5-flash' });
+      await consent(s);
+      const tok = await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST' })).json();
+      expect(tok).toMatchObject({ provider: 'google', token: 'auth_tokens/eph-1', apiVersion: 'v1alpha', model: 'gemini-2.5-flash-native-audio-latest', resumed: false });
+      expect(bodies[0].path).toBe('/v1alpha/auth_tokens');
+      expect(bodies[0].key).toBe('AIza-google-test-key');
+      const setup = bodies[0].body.bidiGenerateContentSetup;
+      expect(bodies[0].body.uses).toBe(1);
+      expect(bodies[0].body.fieldMask).toBeUndefined();
+      expect(setup.systemInstruction.parts[0].text).toContain('<behavior_policy>');
+      expect(setup.systemInstruction.parts[0].text).toContain('<conversation_state>');
+      expect(setup.tools[0].functionDeclarations.map((t: any) => t.name)).toEqual(expect.arrayContaining(['update_progress', 'end_session']));
+      expect(setup.inputAudioTranscription).toEqual({});
+      expect(setup.outputAudioTranscription).toEqual({});
+      expect(JSON.stringify(tok)).not.toContain('AIza-google-test-key');
+      expect(JSON.stringify(tok)).not.toContain('behavior_policy');
+
+      const { c, welcome } = await connect(s);
+      expect(welcome.config.voiceMode).toBe('realtime');
+      expect(welcome.config.realtime).toEqual({ provider: 'google', model: 'gemini-2.5-flash-native-audio-latest' });
+      c.send({ type: 'start' });
+      const instr = await c.next('realtime.instruction');
+      expect(instr.text).toContain('Hi Jamie Rivera, I am Alex');
+      c.send({ type: 'realtime.transcript', itemId: 'g_c1_1_a', role: 'assistant', text: 'Hi Jamie Rivera, I am Alex. Ready to begin?' });
+      c.send({ type: 'realtime.transcript', itemId: 'g_c1_2_u', role: 'user', text: 'Yes, ready.' });
+      c.send({ type: 'realtime.transcript', itemId: 'g_c1_2_u', role: 'user', text: 'Yes, ready.' }); // duplicate
+      c.send({ type: 'realtime.tool_call', callId: 'function-call-1', name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
+      expect(await c.next('realtime.tool_result')).toEqual({ type: 'realtime.tool_result', callId: 'function-call-1', output: 'Progress recorded.' });
+      // Same per-session tool-call cap as the OpenAI path.
+      for (let i = 2; i <= 21; i++) c.send({ type: 'realtime.tool_call', callId: `fc_${i}`, name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
+      await c.next('realtime.tool_result', (m) => m.callId === 'fc_21' && /too many tool calls/.test(m.output), 10_000);
+      // An interrupted agent turn reported with only the heard text.
+      c.send({ type: 'realtime.transcript', itemId: 'g_c1_3_a', role: 'assistant', text: 'Tell me about', interrupted: true });
+      await eventually(async () => {
+        const turns = await prisma.transcriptTurn.findMany({ where: { sessionId: s.sessionId }, orderBy: { seq: 'asc' } });
+        expect(turns.map((t) => [t.speaker, t.clientTurnId, t.source, t.interrupted])).toEqual([
+          ['AGENT', 'rt_g_c1_1_a', 'realtime', false],
+          ['PARTICIPANT', 'rt_g_c1_2_u', 'realtime', false],
+          ['AGENT', 'rt_g_c1_3_a', 'realtime', true],
+        ]);
+        expect((turns[0]!.metadata as any).provider).toBe('google');
+      });
+
+      // Reconnect with a resumption handle → a new token that resumes the Gemini session (handle locked in).
+      const tok2 = await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ resumeHandle: 'resume-h1' }), headers: { 'content-type': 'application/json' } })).json();
+      expect(tok2).toMatchObject({ token: 'auth_tokens/eph-2', resumed: true, connectConfig: { sessionResumption: { handle: 'resume-h1' } } });
+      expect(bodies[1].body.bidiGenerateContentSetup.sessionResumption).toEqual({ handle: 'resume-h1' });
+      // Reconnect without a handle → a fresh session whose instructions carry the transcript so far (escaped data).
+      await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ reconnect: true }), headers: { 'content-type': 'application/json' } })).json();
+      const resumedPrompt = bodies[2].body.bidiGenerateContentSetup.systemInstruction.parts[0].text as string;
+      expect(resumedPrompt).toContain('<conversation_so_far');
+      expect(resumedPrompt).toContain('participant: Yes, ready.');
+      expect(bodies[2].body.bidiGenerateContentSetup.sessionResumption).toEqual({});
+      // Malformed handles are rejected before reaching Google.
+      const bad = await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ resumeHandle: 'has spaces' }), headers: { 'content-type': 'application/json' } });
+      expect(bad.status).toBe(422);
+      expect(bodies).toHaveLength(3);
+
+      c.send({ type: 'control', action: 'end' });
+      await c.next('state', (m) => m.state === 'ENDING');
+      expect((await c.next('realtime.instruction')).text).toContain('Thanks Jamie Rivera, goodbye!');
+      c.send({ type: 'realtime.transcript', itemId: 'g_c1_4_a', role: 'assistant', text: 'Thanks Jamie Rivera, goodbye!' });
+      await c.next('state', (m) => m.state === 'COMPLETED', 10_000);
+      await eventually(async () => {
+        const rt = await prisma.usageLedger.findMany({ where: { sessionId: s.sessionId, kind: 'REALTIME_SECONDS' } });
+        expect(rt).toHaveLength(1);
+        expect(rt[0]).toMatchObject({ provider: 'google' });
+      });
+    } finally {
+      if (prev === undefined) delete process.env.GEMINI_BASE_URL;
+      else process.env.GEMINI_BASE_URL = prev;
+      server.close();
+    }
+  });
   it('repeated provider failures end the session as FAILED with an error code; non-fatal errors before that', async () => {
     let calls = 0;
     const server: Server = createServer((req, res) => {

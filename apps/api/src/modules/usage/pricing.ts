@@ -17,6 +17,16 @@ export const PRICE_TABLE: Record<string, { inPerMTok?: number; outPerMTok?: numb
   'openai:realtime': { perMinute: 0.3 },
   'openai:tts': { perMChars: 15 },
   'openai:stt': { perMinute: 0.006 },
+  // Google Gemini (ESTIMATES — list prices change often; verify at ai.google.dev/pricing).
+  'google:gemini-2.5-flash': { inPerMTok: 0.3, outPerMTok: 2.5 },
+  'google:gemini-2.5-flash-lite': { inPerMTok: 0.1, outPerMTok: 0.4 },
+  'google:gemini-2.5-pro': { inPerMTok: 1.25, outPerMTok: 10 },
+  'google:gemini-3-flash-preview': { inPerMTok: 0.5, outPerMTok: 3 },
+  'google:gemini-3-pro-preview': { inPerMTok: 2, outPerMTok: 12 },
+  'google:default': { inPerMTok: 0.3, outPerMTok: 2.5 },
+  // Gemini Live native audio is billed per audio token (~25 tokens/s in each direction, plus the
+  // re-read context window); a flat per-minute estimate of a two-way conversation.
+  'google:realtime': { perMinute: 0.05 },
   'deepgram:stt': { perMinute: 0.0077 },
   'elevenlabs:tts': { perMChars: 180 },
   'twilio:voice': { perMinute: 0.014 },

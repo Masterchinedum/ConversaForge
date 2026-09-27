@@ -1,4 +1,4 @@
-import type { SttProviderId, TtsProviderId, VoiceMode } from '@cf/shared';
+import type { LlmProviderId, RealtimeProviderChoice, RealtimeProviderId, SttProviderId, TtsProviderId, VoiceMode } from '@cf/shared';
 
 /** Stored in Session.consent. */
 export interface ConsentRecord {
@@ -18,13 +18,16 @@ export interface ProviderInfo {
   voiceMode: VoiceMode;
   /** The voice mode the scenario asked for (differs from voiceMode when we had to fall back). */
   requestedVoiceMode: VoiceMode;
-  llm: { provider: 'anthropic' | 'openai' | 'simulator'; model: string; source: 'workspace' | 'environment' | 'simulator' };
+  llm: { provider: LlmProviderId; model: string; source: 'workspace' | 'environment' | 'simulator' };
   stt: SttProviderId;
   tts: TtsProviderId;
-  realtime?: { provider: 'openai'; model: string };
+  /** Live speech-to-speech provider actually used (voiceMode 'realtime'). */
+  realtime?: { provider: RealtimeProviderId; model: string; source?: 'workspace' | 'environment' };
+  /** The live provider the scenario asked for ('auto' = first configured: openai → google). */
+  requestedRealtimeProvider?: RealtimeProviderChoice;
   simulated: boolean;
   simulatedParts: string[];
-  /** Human-readable reasons for any fallback (e.g. realtime requested but no OpenAI key). */
+  /** Human-readable reasons for any fallback (e.g. live voice requested but no OpenAI/Google key). */
   fallbacks: string[];
 }
 

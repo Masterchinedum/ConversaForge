@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /** Supported BYO-key providers, the capabilities each can serve, and their config fields. */
 
-export const PROVIDER_IDS = ['anthropic', 'openai', 'deepgram', 'elevenlabs', 'twilio', 'recall', 'google_calendar'] as const;
+export const PROVIDER_IDS = ['anthropic', 'openai', 'google', 'deepgram', 'elevenlabs', 'twilio', 'recall', 'google_calendar'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export const PROVIDER_KINDS = ['LLM', 'REALTIME', 'TTS', 'STT', 'TELEPHONY', 'MEETING', 'CALENDAR'] as const;
@@ -40,6 +40,15 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     secretLabel: 'API key',
     secretHelp: 'Starts with sk-. Create one at platform.openai.com → API keys.',
     docsUrl: 'https://platform.openai.com/docs/api-reference',
+  },
+  google: {
+    id: 'google',
+    name: 'Google Gemini',
+    capabilities: ['LLM', 'REALTIME'],
+    defaultCapabilities: ['LLM', 'REALTIME'],
+    secretLabel: 'API key',
+    secretHelp: 'Gemini Developer API key (usually starts with AIza). Create one at aistudio.google.com → Get API key. Used for Gemini Live voice (via short-lived tokens) and as a language model.',
+    docsUrl: 'https://ai.google.dev/gemini-api/docs',
   },
   deepgram: {
     id: 'deepgram',

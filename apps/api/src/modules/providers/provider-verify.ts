@@ -29,6 +29,9 @@ export function verifyRequest(
       return { url: 'https://api.anthropic.com/v1/models?limit=1', headers: { 'x-api-key': secret, 'anthropic-version': '2023-06-01' } };
     case 'openai':
       return { url: 'https://api.openai.com/v1/models', headers: { authorization: `Bearer ${secret}` } };
+    case 'google':
+      // Same auth header the @google/genai SDK sends; keeps the key out of URLs and proxy logs.
+      return { url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', headers: { 'x-goog-api-key': secret } };
     case 'deepgram':
       return { url: 'https://api.deepgram.com/v1/projects', headers: { authorization: `Token ${secret}` } };
     case 'elevenlabs':
@@ -87,6 +90,10 @@ export async function verifyCredential(
       // A non-JSON 403 comes from a proxy/firewall between us and the provider, not from the provider.
       return { result: 'error', httpStatus: 403, message: 'The request was blocked before reaching the provider (HTTP 403 from a proxy or firewall). Check outbound network access.' };
     }
+    if (provider === 'google' && res.status === 400 && /API_KEY_INVALID|API key not valid/i.test(body)) {
+      // The Gemini API answers an unknown key with 400 INVALID_ARGUMENT (reason API_KEY_INVALID).
+      return { result: 'invalid', httpStatus: res.status, message: `The provider rejected the credential (HTTP 400)${hint ? `: ${hint}` : ''}` };
+    }
     if (res.status === 401 || res.status === 403) {
       return { result: 'invalid', httpStatus: res.status, message: `The provider rejected the credential (HTTP ${res.status})${hint ? `: ${hint}` : ''}` };
     }
@@ -133,5 +140,6 @@ function providerMessage(body: string, secret: string): string {
   if (secret && secret.length >= 6) msg = msg.split(secret).join('[redacted]');
   // Providers sometimes echo partial keys ("Incorrect API key provided: sk-abc***xyz").
   msg = msg.replace(/\b(sk-[A-Za-z0-9_-]{2})[A-Za-z0-9_*-]{6,}/g, '$1…');
+  msg = msg.replace(/\b(AIza)[A-Za-z0-9_-]{6,}/g, '$1…');
   return msg;
 }

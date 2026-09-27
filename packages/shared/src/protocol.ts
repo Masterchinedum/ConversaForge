@@ -1,11 +1,12 @@
 import type { SessionState } from './session-state';
-import type { SttProviderId, TtsProviderId, VoiceMode } from './scenario-config';
+import type { RealtimeProviderId, SttProviderId, TtsProviderId, VoiceMode } from './scenario-config';
 
 /**
  * Live session wire protocol (JSON over WebSocket at `${API_WS_URL}/ws/session`).
  * The participant authenticates with the per-session token returned when the session is created.
  * Provider-specific audio stays on the client (browser STT/TTS) or goes directly client⇄provider
- * (OpenAI Realtime over WebRTC); this channel carries turns, control, tools and state.
+ * (OpenAI Realtime over WebRTC, Google Gemini Live over WebSocket with an ephemeral token); this channel
+ * carries turns, control, tools and state.
  */
 
 export const PROTOCOL_VERSION = 1;
@@ -50,7 +51,10 @@ export interface ClientRuntimeConfig {
   /** True when any part of the pipeline is the local development simulator. */
   simulated: boolean;
   simulatedParts: string[];
-  realtime?: { provider: 'openai'; model: string };
+  /** Live speech-to-speech provider actually used (voiceMode 'realtime' only). */
+  realtime?: { provider: RealtimeProviderId; model: string };
+  /** (additive) The voice mode the scenario asked for; differs from voiceMode after a server-side fallback. */
+  requestedVoiceMode?: VoiceMode;
   branding?: { displayName?: string; logoUrl?: string; primaryColor?: string; hidePoweredBy?: boolean };
 }
 
@@ -154,8 +158,10 @@ export type ServerMessage =
   | { type: 'realtime.tool_result'; callId: string; output: string }
   /**
    * (B, additive) Realtime mode only: an instruction for the realtime model (timed nudge, wrap-up, closing).
-   * The client forwards it on the data channel as a `conversation.item.create` with role "system"
-   * (input_text) and, when `respond` is true, follows with `response.create`.
+   * OpenAI: the client forwards it on the data channel as a `conversation.item.create` with role
+   * "system" (input_text) and, when `respond` is true, follows with `response.create`.
+   * Google Gemini Live: the client sends it as a client-content text turn (clearly framed as a runtime
+   * instruction) with `turnComplete = respond`, deferred while the model is generating.
    */
   | { type: 'realtime.instruction'; text: string; respond?: boolean }
   | { type: 'timer'; elapsedMs: number; remainingMs: number }

@@ -59,7 +59,8 @@ export class ClientConfigService {
       participantTools: this.tools.participantTools(config),
       simulated: !!pi.simulated,
       simulatedParts: pi.simulatedParts ?? [],
-      ...(pi.voiceMode === 'realtime' && pi.realtime ? { realtime: pi.realtime } : {}),
+      ...(pi.voiceMode === 'realtime' && pi.realtime ? { realtime: { provider: pi.realtime.provider, model: pi.realtime.model } } : {}),
+      ...(pi.requestedVoiceMode ? { requestedVoiceMode: pi.requestedVoiceMode } : {}),
       branding: await this.branding(session.workspaceId),
     };
   }

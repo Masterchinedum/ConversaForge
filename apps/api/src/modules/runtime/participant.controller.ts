@@ -26,6 +26,19 @@ const RecordingBody = z.object({ kind: z.enum(['audio', 'video']), mimeType: z.s
 const CompleteBody = z.object({ durationMs: z.number().int().min(0).optional() }).strict();
 const TtsBody = z.object({ text: z.string().min(1).max(1500), format: z.enum(['mp3', 'pcm']).optional() }).strict();
 const STT_MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * Live-voice token request. Both fields are optional (an empty body mints a fresh session):
+ * - `resumeHandle`: Gemini Live session-resumption handle from the previous connection (goAway / drop).
+ * - `reconnect`: the previous live connection was lost and cannot be resumed → the new session's
+ *   instructions include the recent transcript so the conversation continues.
+ */
+const RealtimeTokenBody = z
+  .object({
+    resumeHandle: z.string().min(1).max(2048).regex(/^[\x21-\x7e]+$/, 'Invalid resume handle').optional(),
+    reconnect: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
 
 /**
  * Participant-facing session endpoints. No user login: every call carries the per-session token
@@ -138,23 +151,38 @@ export class ParticipantController {
   }
 
   @Post('realtime-token')
-  async realtimeToken(@Param('sessionId') sessionId: string, @Headers('authorization') authz?: string) {
+  async realtimeToken(
+    @Param('sessionId') sessionId: string,
+    @Body(new ZodPipe(RealtimeTokenBody)) body: z.infer<typeof RealtimeTokenBody>,
+    @Headers('authorization') authz?: string,
+  ) {
     const s = await this.auth(sessionId, authz);
     await this.rateLimit.enforce(`rt:rtok:${s.id}`, 10, 60, 'Too many realtime token requests');
     if (isTerminal(s.state as SessionState)) throw Errors.conflict('The session has ended');
     const pi = s.providerInfo as unknown as ProviderInfo;
     if (pi?.voiceMode !== 'realtime') throw Errors.conflict('This session does not use realtime voice', { voiceMode: pi?.voiceMode, fallbacks: pi?.fallbacks });
+    const provider = pi.realtime?.provider ?? 'openai';
     const { config } = await this.sessions.load(s.id);
     const engine = await this.runtime.getEngine(s.id);
-    const setup = await engine.realtimeSetup();
+    // Only Gemini Live resumes by handle; any other reconnect gets the transcript so far in its instructions.
+    const resumeHandle = provider === 'google' ? body?.resumeHandle : undefined;
+    const setup = await engine.realtimeSetup({ withHistory: !resumeHandle && (!!body?.reconnect || !!body?.resumeHandle) });
     const creds = await this.realtime.mint({
       workspaceId: s.workspaceId,
+      provider,
       model: pi.realtime?.model ?? '',
       instructions: setup.instructions,
       tools: setup.tools,
       config,
+      resumeHandle,
     });
-    await this.prisma.sessionEvent.create({ data: { sessionId: s.id, type: 'provider.realtime_token', payload: { model: creds.model, expiresAt: creds.expiresAt } } });
+    await this.prisma.sessionEvent.create({
+      data: {
+        sessionId: s.id,
+        type: 'provider.realtime_token',
+        payload: { provider, model: creds.model, expiresAt: creds.expiresAt, resumed: !!resumeHandle, reconnect: !!body?.reconnect },
+      },
+    });
     return creds;
   }
 

@@ -259,7 +259,7 @@ export class ProvidersService {
           simulated: r.simulated,
           connectionId: conn?.id ?? null,
           message: r.simulated
-            ? `Simulator (no key) — add an Anthropic or OpenAI key for real ${purpose === 'live' ? 'conversations' : 'analysis'}.${this.invalidNote(conns, ['anthropic', 'openai'])}`
+            ? `Simulator (no key) — add an Anthropic, OpenAI or Google Gemini key for real ${purpose === 'live' ? 'conversations' : 'analysis'}.${this.invalidNote(conns, ['anthropic', 'openai', 'google'])}`
             : `${PROVIDERS[r.provider.id as ProviderId]?.name ?? r.provider.id} · ${r.model} (${r.source === 'workspace' ? 'workspace key' : 'server key'})`,
         });
       } catch (e) {
@@ -278,28 +278,35 @@ export class ProvidersService {
     };
     const openaiEnv = !!env.OPENAI_API_KEY;
 
-    const realtime = pick([{ provider: 'openai', cap: 'REALTIME', envKey: openaiEnv }]);
-    out.push(
-      realtime
-        ? {
-            key: 'realtime_voice',
-            label: 'Realtime voice',
-            source: realtime.source,
-            provider: 'openai',
-            model: ((realtime.conn?.config as ProviderConfig | undefined)?.realtimeModel ?? env.OPENAI_REALTIME_MODEL) || null,
-            simulated: false,
-            connectionId: realtime.connectionId,
-            message: `OpenAI Realtime (${realtime.source === 'workspace' ? 'workspace key' : 'server key'})`,
-          }
-        : {
-            key: 'realtime_voice',
-            label: 'Realtime voice',
-            source: 'unavailable',
-            provider: null,
-            simulated: false,
-            message: `Not configured — sessions use the speech pipeline (browser speech + LLM). Add an OpenAI key to enable realtime voice.${this.invalidNote(conns, ['openai'])}`,
-          },
-    );
+    // Live speech-to-speech: 'auto' order (openai → google), workspace connections before server keys.
+    const liveProviders: Array<{ provider: 'openai' | 'google'; name: string; envKey: boolean; defaultModel: string }> = [
+      { provider: 'openai', name: 'OpenAI Realtime', envKey: openaiEnv, defaultModel: env.OPENAI_REALTIME_MODEL },
+      { provider: 'google', name: 'Google Gemini Live', envKey: !!env.GEMINI_API_KEY, defaultModel: env.GEMINI_LIVE_MODEL },
+    ];
+    const realtime = pick(liveProviders.map((l) => ({ provider: l.provider, cap: 'REALTIME' as ProviderKind, envKey: l.envKey })));
+    const others = liveProviders.filter((l) => l.provider !== realtime?.provider && (active(l.provider, 'REALTIME') || l.envKey));
+    if (realtime) {
+      const lp = liveProviders.find((l) => l.provider === realtime.provider)!;
+      out.push({
+        key: 'realtime_voice',
+        label: 'Live voice (speech-to-speech)',
+        source: realtime.source,
+        provider: realtime.provider,
+        model: ((realtime.conn?.config as ProviderConfig | undefined)?.realtimeModel ?? lp.defaultModel) || null,
+        simulated: false,
+        connectionId: realtime.connectionId,
+        message: `${lp.name} (${realtime.source === 'workspace' ? 'workspace key' : 'server key'}) — default for live conversations${others.length ? `; also available: ${others.map((o) => o.name).join(', ')}` : ''}.`,
+      });
+    } else {
+      out.push({
+        key: 'realtime_voice',
+        label: 'Live voice (speech-to-speech)',
+        source: 'unavailable',
+        provider: null,
+        simulated: false,
+        message: `Not configured — live conversations fall back to the speech pipeline (speech-to-text → language model → text-to-speech). Add an OpenAI or Google Gemini key to enable live voice.${this.invalidNote(conns, ['openai', 'google'])}`,
+      });
+    }
 
     const tts = pick([
       { provider: 'openai', cap: 'TTS', envKey: openaiEnv },
@@ -378,6 +385,7 @@ export class ProvidersService {
     const keep: Record<ProviderId, Array<keyof ProviderConfig>> = {
       anthropic: ['liveModel', 'analysisModel'],
       openai: ['liveModel', 'analysisModel', 'realtimeModel', 'ttsModel', 'sttModel', 'voice'],
+      google: ['liveModel', 'analysisModel', 'realtimeModel', 'voice'],
       deepgram: ['ttsModel', 'sttModel', 'voice'],
       elevenlabs: ['ttsModel', 'sttModel', 'voice'],
       twilio: ['accountSid', 'phoneNumber'],

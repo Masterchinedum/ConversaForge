@@ -101,7 +101,7 @@ export const ToolEnablementSchema = z.object({
 });
 export type ToolEnablement = z.infer<typeof ToolEnablementSchema>;
 
-export const LLM_PROVIDERS = ['anthropic', 'openai', 'simulator'] as const;
+export const LLM_PROVIDERS = ['anthropic', 'openai', 'google', 'simulator'] as const;
 export type LlmProviderId = (typeof LLM_PROVIDERS)[number];
 export const VOICE_MODES = ['pipeline', 'realtime'] as const;
 export type VoiceMode = (typeof VOICE_MODES)[number];
@@ -109,7 +109,14 @@ export const STT_PROVIDERS = ['browser', 'openai', 'deepgram', 'typed'] as const
 export type SttProviderId = (typeof STT_PROVIDERS)[number];
 export const TTS_PROVIDERS = ['browser', 'openai', 'elevenlabs', 'none'] as const;
 export type TtsProviderId = (typeof TTS_PROVIDERS)[number];
-export const REALTIME_PROVIDERS = ['openai'] as const;
+/**
+ * Live speech-to-speech providers. 'auto' = the first live provider with a configured credential, in the
+ * order openai → google (workspace connection first, then server env key); none → pipeline fallback.
+ */
+export const REALTIME_PROVIDERS = ['auto', 'openai', 'google'] as const;
+export type RealtimeProviderChoice = (typeof REALTIME_PROVIDERS)[number];
+/** A concrete live-model provider (what a session actually uses). */
+export type RealtimeProviderId = Exclude<RealtimeProviderChoice, 'auto'>;
 
 export const ScenarioConfigSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION).default(SCHEMA_VERSION),
@@ -215,13 +222,18 @@ export const ScenarioConfigSchema = z.object({
 
   model: z
     .object({
-      voiceMode: z.enum(VOICE_MODES).default('pipeline'),
+      /**
+       * 'realtime' (default) = live speech-to-speech model (OpenAI Realtime / Google Gemini Live); the
+       * runtime falls back to 'pipeline' (STT → LLM → TTS) when no live-model credential is configured.
+       */
+      voiceMode: z.enum(VOICE_MODES).default('realtime'),
       llmProvider: z.enum(LLM_PROVIDERS).default('anthropic'),
       llmModel: z.string().max(100).default(''),
       temperature: z.number().min(0).max(1.5).default(0.7),
       sttProvider: z.enum(STT_PROVIDERS).default('browser'),
       ttsProvider: z.enum(TTS_PROVIDERS).default('browser'),
-      realtimeProvider: z.enum(REALTIME_PROVIDERS).default('openai'),
+      realtimeProvider: z.enum(REALTIME_PROVIDERS).default('auto'),
+      /** Live model override (empty = server default for the chosen provider). */
       realtimeModel: z.string().max(100).default(''),
     })
     .default({}),
@@ -473,6 +485,23 @@ export function validateScenarioForPublish(input: unknown): {
         issues.push({ path, message: `Unknown variable {{${key}}} — add it to the variable allowlist`, severity: 'error' });
       }
     }
+  }
+
+  if (c.model.voiceMode === 'realtime' && c.model.realtimeModel.trim()) {
+    const m = c.model.realtimeModel.trim().toLowerCase();
+    const looksGoogle = m.startsWith('gemini') || m.startsWith('models/gemini');
+    if (c.model.realtimeProvider === 'openai' && looksGoogle) {
+      issues.push({ path: 'model.realtimeModel', message: 'This looks like a Gemini model but the live provider is OpenAI Realtime', severity: 'warning' });
+    } else if (c.model.realtimeProvider === 'google' && !looksGoogle) {
+      issues.push({ path: 'model.realtimeModel', message: 'This does not look like a Gemini Live model but the live provider is Google Gemini Live', severity: 'warning' });
+    }
+  }
+  if (c.model.voiceMode === 'realtime' && (c.channels.phone.enabled || c.channels.meeting.enabled)) {
+    issues.push({
+      path: 'model.voiceMode',
+      message: 'Live speech-to-speech runs in the browser only; phone and meeting sessions use the speech pipeline (STT → LLM → TTS)',
+      severity: 'warning',
+    });
   }
 
   if (c.channels.phone.enabled && c.model.ttsProvider === 'browser') {
