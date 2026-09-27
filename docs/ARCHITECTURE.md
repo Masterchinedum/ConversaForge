@@ -12,7 +12,7 @@ Read it fully before changing code.
 | DB | PostgreSQL 16 via Prisma 6 |
 | Jobs | BullMQ on Redis/Valkey (worker can run in-process or as `node dist/worker.js`) |
 | Storage | Local disk (dev) or a Cloudflare R2 bucket; tenant-prefixed keys, signed URLs |
-| AI | Provider adapters: Anthropic (Claude), OpenAI (LLM, Realtime voice, TTS/STT), Google Gemini (`@google/genai`: LLM, Gemini Live voice), local **simulator**. Live conversations default to a speech-to-speech model (OpenAI Realtime / Gemini Live) with automatic fallback to the STT → LLM → TTS pipeline |
+| AI | Provider adapters: Anthropic (Claude), OpenAI (LLM, Realtime voice, TTS/STT), Google Gemini (`@google/genai`: LLM, Gemini Live voice), local **simulator**. Live conversations default to a speech-to-speech model (Gemini Live, then OpenAI as backup) with automatic fallback to the STT → LLM → TTS pipeline |
 | Shared | `packages/shared` (`@cf/shared`): scenario schema, validation, scoring math, variables, state machine, WS protocol, tool catalog |
 
 Do NOT add GPL/AGPL/SSPL/BUSL dependencies. Check the license of anything new (`npm view <pkg> license`).
@@ -128,7 +128,7 @@ verifySessionToken(sessionId: string, token: string): Promise<Session>   // thro
 Participant session REST (B), authenticated with `Authorization: Bearer cfs_…`:
 - `GET  /api/runtime/sessions/:id` → bootstrap (scenario public info, consent needs, state, ClientRuntimeConfig)
 - `POST /api/runtime/sessions/:id/consent` `{ recordAudio, recordVideo, analysis }`
-- `POST /api/runtime/sessions/:id/realtime-token` `{ resumeHandle?, reconnect? }` → live-model credentials for the provider in `providerInfo.realtime.provider`: OpenAI `{ provider:'openai', model, clientSecret, expiresAt, callsUrl, voice }` or Google `{ provider:'google', model, token:'auth_tokens/…', apiVersion:'v1alpha', expiresAt, newSessionExpiresAt, voice, connectConfig, audio, resumed }` (single-use ephemeral token, full Live setup locked server-side; never the real key or the prompt). See `docs/workstreams/I-live-models.md`
+- `POST /api/runtime/sessions/:id/realtime-token` `{ resumeHandle?, reconnect?, provider? }` → live-model credentials for the provider in `providerInfo.realtime.provider` (naming `providerInfo.realtime.backup.provider` switches the session to its backup, e.g. after Gemini Live fails in the browser): OpenAI `{ provider:'openai', model, clientSecret, expiresAt, callsUrl, voice }` or Google `{ provider:'google', model, token:'auth_tokens/…', apiVersion:'v1alpha', expiresAt, newSessionExpiresAt, voice, connectConfig, audio, resumed }` (single-use ephemeral token, full Live setup locked server-side; never the real key or the prompt). See `docs/workstreams/I-live-models.md`
 - `POST /api/runtime/sessions/:id/recordings` → `{ assetId }`; `PUT .../recordings/:assetId/parts/:n` (binary); `POST .../recordings/:assetId/complete`
 - `POST /api/runtime/sessions/:id/uploads` (document_upload tool; multipart)
 - `POST /api/runtime/sessions/:id/tts` `{ text }` → audio (server TTS, if configured)

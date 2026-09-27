@@ -1734,6 +1734,19 @@ export class SessionEngine {
    * block + the current dynamic block. `withHistory` (live reconnect without a resumable provider session)
    * appends the recent transcript as escaped data so a fresh live session can continue the conversation.
    */
+  /**
+   * Live voice failed over to the backup provider in the browser: persist it so usage, turn metadata and
+   * the session record name the provider actually used.
+   */
+  async switchRealtimeProvider(realtime: NonNullable<ProviderInfo['realtime']>, note: string) {
+    const providerInfo: ProviderInfo = { ...this.providerInfo, realtime, fallbacks: [...(this.providerInfo?.fallbacks ?? []), note] };
+    this.session = await this.deps.prisma.session.update({
+      where: { id: this.id },
+      data: { providerInfo: providerInfo as unknown as Prisma.InputJsonValue },
+    });
+    this.logger.log(`Session ${this.id}: ${note}`);
+  }
+
   async realtimeSetup(opts: { withHistory?: boolean } = {}) {
     const toolset = await this.ensureToolset();
     let instructions = `${await this.stableSystemPrompt()}

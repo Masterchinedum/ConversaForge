@@ -74,12 +74,13 @@ export class ProviderResolverService {
               `${LIVE_NAMES[requestedLive]} was requested but no ${requestedLive === 'openai' ? 'OpenAI key (OPENAI_API_KEY' : 'Google key (GEMINI_API_KEY'} or a workspace connection) is configured; using ${LIVE_NAMES[pick.provider]} instead.`,
             );
           }
-          const secret = pick.provider === 'openai' ? openaiSecret : googleSecret;
-          realtime = {
-            provider: pick.provider,
-            model: liveModel(pick.provider, config.model.realtimeModel, requestedLive, secret?.config),
-            source: secret!.source,
-          };
+          const secrets = { openai: openaiSecret, google: googleSecret };
+          const live = (provider: RealtimeProviderId) => ({
+            provider,
+            model: liveModel(provider, config.model.realtimeModel, requestedLive, secrets[provider]?.config),
+            source: secrets[provider]!.source,
+          });
+          realtime = { ...live(pick.provider), ...(pick.backup ? { backup: live(pick.backup) } : {}) };
         }
       }
     }
@@ -125,16 +126,20 @@ export class ProviderResolverService {
 }
 
 export const LIVE_NAMES: Record<RealtimeProviderId, string> = { openai: 'OpenAI Realtime', google: 'Google Gemini Live' };
-/** 'auto' order (documented in the scenario schema): OpenAI first, then Google. */
-export const LIVE_AUTO_ORDER: RealtimeProviderId[] = ['openai', 'google'];
+/** 'auto' order (documented in the scenario schema): Google Gemini Live first, then OpenAI. */
+export const LIVE_AUTO_ORDER: RealtimeProviderId[] = ['google', 'openai'];
 
-/** Preferred live provider if configured, otherwise the other one; null when neither has a credential. */
+/**
+ * Preferred live provider if configured, otherwise the other one (null when neither has a credential),
+ * plus the next configured provider as the runtime backup.
+ */
 export function pickLiveProvider(
   requested: RealtimeProviderChoice,
   available: Record<RealtimeProviderId, unknown>,
-): { provider: RealtimeProviderId | null } {
+): { provider: RealtimeProviderId | null; backup: RealtimeProviderId | null } {
   const order = requested === 'auto' ? LIVE_AUTO_ORDER : [requested, ...LIVE_AUTO_ORDER.filter((p) => p !== requested)];
-  return { provider: order.find((p) => !!available[p]) ?? null };
+  const [provider = null, backup = null] = order.filter((p) => !!available[p]);
+  return { provider, backup };
 }
 
 function looksLikeGemini(model: string) {

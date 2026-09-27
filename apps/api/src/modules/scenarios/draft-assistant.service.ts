@@ -63,7 +63,7 @@ export const FIELD_GUIDE: Record<EditableFieldPath, string> = {
   'conversation.turnTaking':
     'object {mode: vad|push_to_talk, endOfTurnSilenceMs: 300–5000, thinkingPauseGraceMs: 0–60000, silenceCheckInMs: 0–120000, allowBargeIn: boolean}.',
   'conversation.timedInstructions': 'array of {id: slug, atSecond: int, action: nudge|wrap_up|end, instruction: string}.',
-  model: 'object {voiceMode: realtime (default, live speech-to-speech)|pipeline, llmProvider: anthropic|openai|google|simulator, llmModel, temperature 0–1.5, sttProvider, ttsProvider, realtimeProvider: auto|openai|google, realtimeModel}.',
+  model: 'object {voiceMode: realtime (default, live speech-to-speech)|pipeline, llmProvider: anthropic|openai|google|simulator, llmModel, temperature 0–1.5, sttProvider, ttsProvider, realtimeProvider: auto (Gemini Live, then OpenAI)|google|openai, realtimeModel}.',
   audio: 'object {echoCancellation, noiseSuppression, autoGainControl, allowCamera: booleans}.',
   recording: 'object {audio: boolean, video: boolean, consentNotice: string, retentionDays: 1–3650}.',
   analysis:

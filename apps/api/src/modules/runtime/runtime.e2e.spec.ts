@@ -782,12 +782,12 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       ).json()) as any;
       const s = { sessionId: created.sessionId, sessionToken: created.sessionToken };
       const row = await prisma.session.findUniqueOrThrow({ where: { id: s.sessionId } });
-      expect(row.providerInfo).toMatchObject({ voiceMode: 'realtime', realtime: { provider: 'google', model: 'gemini-2.5-flash-native-audio-latest' }, requestedRealtimeProvider: 'auto' });
+      expect(row.providerInfo).toMatchObject({ voiceMode: 'realtime', realtime: { provider: 'google', model: 'gemini-3.8-live' }, requestedRealtimeProvider: 'auto' });
       // Anthropic preferred for text but absent → the Google key also serves the text LLM (fallback order).
       expect((row.providerInfo as any).llm).toMatchObject({ provider: 'google', model: 'gemini-2.5-flash' });
       await consent(s);
       const tok = await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST' })).json();
-      expect(tok).toMatchObject({ provider: 'google', token: 'auth_tokens/eph-1', apiVersion: 'v1alpha', model: 'gemini-2.5-flash-native-audio-latest', resumed: false });
+      expect(tok).toMatchObject({ provider: 'google', token: 'auth_tokens/eph-1', apiVersion: 'v1alpha', model: 'gemini-3.8-live', resumed: false });
       expect(bodies[0].path).toBe('/v1alpha/auth_tokens');
       expect(bodies[0].key).toBe('AIza-google-test-key');
       const setup = bodies[0].body.bidiGenerateContentSetup;
@@ -803,7 +803,7 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
 
       const { c, welcome } = await connect(s);
       expect(welcome.config.voiceMode).toBe('realtime');
-      expect(welcome.config.realtime).toEqual({ provider: 'google', model: 'gemini-2.5-flash-native-audio-latest' });
+      expect(welcome.config.realtime).toEqual({ provider: 'google', model: 'gemini-3.8-live' });
       c.send({ type: 'start' });
       const instr = await c.next('realtime.instruction');
       expect(instr.text).toContain('Hi Jamie Rivera, I am Alex');
@@ -905,6 +905,101 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
     } finally {
       if (prevBase === undefined) delete process.env.ANTHROPIC_BASE_URL;
       else process.env.ANTHROPIC_BASE_URL = prevBase;
+      server.close();
+    }
+  });
+
+  it('live voice failover: Gemini Live first, the browser can switch the session to the OpenAI backup', async () => {
+    const calls: Array<{ path?: string }> = [];
+    const server: Server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        calls.push({ path: req.url });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          req.url?.includes('auth_tokens')
+            ? JSON.stringify({ name: 'auth_tokens/eph-failover' })
+            : JSON.stringify({ value: 'ek_backup', expires_at: 1900000000, session: { type: 'realtime', model: 'gpt-realtime-2.1' } }),
+        );
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const port = (server.address() as any).port;
+    const prev = { g: process.env.GEMINI_BASE_URL, o: process.env.OPENAI_BASE_URL };
+    process.env.GEMINI_BASE_URL = `http://127.0.0.1:${port}`;
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${port}/v1`;
+    try {
+      const fx = await createWorkspaceFixture(prisma as any);
+      const crypto = app.get(CryptoService);
+      await prisma.providerConnection.create({
+        data: { workspaceId: fx.workspace.id, provider: 'google', kind: 'LLM', config: { capabilities: ['LLM', 'REALTIME'] }, encryptedSecret: crypto.encrypt('AIza-google-test-key') },
+      });
+      await prisma.providerConnection.create({
+        data: { workspaceId: fx.workspace.id, provider: 'openai', kind: 'REALTIME', encryptedSecret: crypto.encrypt('sk-openai-test') },
+      });
+      const ic = interviewConfig();
+      const cfg = { ...ic, model: { ...ic.model, voiceMode: 'realtime' as const, realtimeProvider: 'auto' as const } };
+      const { scenario } = await publishScenario(prisma as any, fx.workspace.id, cfg);
+      const newSession = async () => {
+        const created = (await (
+          await fetch(`${base}/api/workspaces/${fx.workspace.id}/scenarios/${scenario.id}/sessions`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${fx.cookieToken}`, 'content-type': 'application/json' },
+            body: '{}',
+          })
+        ).json()) as any;
+        return { sessionId: created.sessionId, sessionToken: created.sessionToken };
+      };
+      const token = (s: { sessionId: string; sessionToken: string }, body: unknown) =>
+        rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
+
+      const s = await newSession();
+      const row = await prisma.session.findUniqueOrThrow({ where: { id: s.sessionId } });
+      expect((row.providerInfo as any).realtime).toMatchObject({ provider: 'google', model: 'gemini-3.8-live', backup: { provider: 'openai', model: 'gpt-realtime-2.1' } });
+      await consent(s);
+      const { c, welcome } = await connect(s);
+      expect(welcome.config.realtime).toEqual({ provider: 'google', model: 'gemini-3.8-live', backup: { provider: 'openai', model: 'gpt-realtime-2.1' } });
+      expect(await (await token(s, { provider: 'google' })).json()).toMatchObject({ provider: 'google', token: 'auth_tokens/eph-failover' });
+
+      // Gemini failed in the browser → the OpenAI adapter asks for its credentials, which switches the session.
+      const backup = await (await token(s, { provider: 'openai' })).json();
+      expect(backup).toMatchObject({ provider: 'openai', clientSecret: 'ek_backup', model: 'gpt-realtime-2.1' });
+      expect(calls.map((x) => x.path)).toEqual(['/v1alpha/auth_tokens', '/v1/realtime/client_secrets']);
+      const after = (await prisma.session.findUniqueOrThrow({ where: { id: s.sessionId } })).providerInfo as any;
+      expect(after.realtime).toMatchObject({ provider: 'openai', model: 'gpt-realtime-2.1', backup: { provider: 'google', model: 'gemini-3.8-live' } });
+      expect(after.fallbacks.join(' ')).toMatch(/Google Gemini Live failed in the browser; switched to OpenAI Realtime/);
+      const ev = await prisma.sessionEvent.findFirst({ where: { sessionId: s.sessionId, type: 'provider.realtime_token' }, orderBy: { createdAt: 'desc' } });
+      expect(ev?.payload).toMatchObject({ provider: 'openai', switched: true });
+
+      // Usage is attributed to the provider actually used after the switch.
+      c.send({ type: 'start' });
+      await c.next('realtime.instruction');
+      c.send({ type: 'realtime.transcript', itemId: 'fo_a1', role: 'assistant', text: 'Hi Jamie Rivera, I am Alex. Ready to begin?' });
+      await eventually(async () => {
+        const turns = await prisma.transcriptTurn.findMany({ where: { sessionId: s.sessionId } });
+        expect((turns[0]?.metadata as any)?.provider).toBe('openai');
+      });
+      c.send({ type: 'control', action: 'end' });
+      await c.next('state', (m) => m.state === 'ENDING');
+      await c.next('realtime.instruction');
+      c.send({ type: 'realtime.transcript', itemId: 'fo_a2', role: 'assistant', text: 'Thanks Jamie Rivera, goodbye!' });
+      await c.next('state', (m) => m.state === 'COMPLETED', 10_000);
+      await eventually(async () => {
+        const rt = await prisma.usageLedger.findMany({ where: { sessionId: s.sessionId, kind: 'REALTIME_SECONDS' } });
+        expect(rt[0]).toMatchObject({ provider: 'openai' });
+      });
+
+      // A provider that is neither the session's live provider nor its backup is refused.
+      await prisma.providerConnection.deleteMany({ where: { workspaceId: fx.workspace.id, provider: 'openai' } });
+      const solo = await newSession();
+      expect(((await prisma.session.findUniqueOrThrow({ where: { id: solo.sessionId } })).providerInfo as any).realtime.backup).toBeUndefined();
+      await consent(solo);
+      expect((await token(solo, { provider: 'openai' })).status).toBe(409);
+    } finally {
+      for (const [k, v] of [['GEMINI_BASE_URL', prev.g], ['OPENAI_BASE_URL', prev.o]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
       server.close();
     }
   });

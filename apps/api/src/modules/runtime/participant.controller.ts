@@ -18,6 +18,7 @@ import { RecordingsService, baseMime } from './recordings.service';
 import { RuntimeService } from './runtime.service';
 import type { ConsentRecord, ProviderInfo } from './runtime.types';
 import { SessionsService } from './sessions.service';
+import { LIVE_NAMES } from './voice/provider-resolver.service';
 import { RealtimeService } from './voice/realtime.service';
 import { SpeechService } from './voice/speech.service';
 
@@ -36,6 +37,8 @@ const RealtimeTokenBody = z
   .object({
     resumeHandle: z.string().min(1).max(2048).regex(/^[\x21-\x7e]+$/, 'Invalid resume handle').optional(),
     reconnect: z.boolean().optional(),
+    /** Live provider the browser adapter is for; naming the session's backup provider switches to it. */
+    provider: z.enum(['google', 'openai']).optional(),
   })
   .strict()
   .optional();
@@ -161,16 +164,27 @@ export class ParticipantController {
     if (isTerminal(s.state as SessionState)) throw Errors.conflict('The session has ended');
     const pi = s.providerInfo as unknown as ProviderInfo;
     if (pi?.voiceMode !== 'realtime') throw Errors.conflict('This session does not use realtime voice', { voiceMode: pi?.voiceMode, fallbacks: pi?.fallbacks });
-    const provider = pi.realtime?.provider ?? 'openai';
     const { config } = await this.sessions.load(s.id);
     const engine = await this.runtime.getEngine(s.id);
-    // Only Gemini Live resumes by handle; any other reconnect gets the transcript so far in its instructions.
-    const resumeHandle = provider === 'google' ? body?.resumeHandle : undefined;
-    const setup = await engine.realtimeSetup({ withHistory: !resumeHandle && (!!body?.reconnect || !!body?.resumeHandle) });
+    let live: NonNullable<ProviderInfo['realtime']> = pi.realtime ?? { provider: 'openai', model: '' };
+    // The first live provider failed in the browser: switch the session to its backup (Gemini → OpenAI).
+    const switched = !!body?.provider && body.provider !== live.provider;
+    if (switched) {
+      const backup = live.backup;
+      if (!backup || backup.provider !== body!.provider) {
+        throw Errors.conflict(`${LIVE_NAMES[body!.provider!]} is not available for this session`, { provider: body!.provider });
+      }
+      live = { ...backup, backup: { provider: live.provider, model: live.model, source: live.source } };
+      await engine.switchRealtimeProvider(live, `${LIVE_NAMES[live.backup!.provider]} failed in the browser; switched to ${LIVE_NAMES[live.provider]}.`);
+    }
+    const provider = live.provider;
+    // Only Gemini Live resumes by handle; any other reconnect (or a provider switch) gets the transcript so far.
+    const resumeHandle = provider === 'google' && !switched ? body?.resumeHandle : undefined;
+    const setup = await engine.realtimeSetup({ withHistory: !resumeHandle && (switched || !!body?.reconnect || !!body?.resumeHandle) });
     const creds = await this.realtime.mint({
       workspaceId: s.workspaceId,
       provider,
-      model: pi.realtime?.model ?? '',
+      model: live.model,
       instructions: setup.instructions,
       tools: setup.tools,
       config,
@@ -180,7 +194,7 @@ export class ParticipantController {
       data: {
         sessionId: s.id,
         type: 'provider.realtime_token',
-        payload: { provider, model: creds.model, expiresAt: creds.expiresAt, resumed: !!resumeHandle, reconnect: !!body?.reconnect },
+        payload: { provider, model: creds.model, expiresAt: creds.expiresAt, resumed: !!resumeHandle, reconnect: !!body?.reconnect, switched },
       },
     });
     return creds;

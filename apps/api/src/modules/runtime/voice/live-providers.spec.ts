@@ -75,13 +75,14 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(exp).toBeLessThanOrEqual(GEMINI_TOKEN.expireSeconds * 1000 + 5000);
     expect(start).toBeLessThanOrEqual(2 * 60_000 + 5000);
     const setup = b.bidiGenerateContentSetup;
-    expect(setup.model).toBe('models/gemini-2.5-flash-native-audio-latest');
+    expect(setup.model).toBe('models/gemini-3.8-live');
     expect(setup.systemInstruction.parts[0].text).toContain('<behavior_policy>');
     expect(setup.systemInstruction.parts[0].text).toContain('<conversation_state>');
     expect(setup.tools[0].functionDeclarations.map((f: any) => f.name)).toEqual(['update_progress', 'end_session', 'fn_lookup_order']);
     expect(setup.tools[0].functionDeclarations[1].parametersJsonSchema.required).toEqual(['reason']);
     expect(setup.generationConfig.responseModalities).toEqual(['AUDIO']);
-    expect(setup.generationConfig.speechConfig).toEqual({ voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }); // native audio: no languageCode
+    // gemini-3.8-live is not a native-audio model name, so the scenario language is sent too.
+    expect(setup.generationConfig.speechConfig).toEqual({ voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, languageCode: config.basics.language });
     expect(setup.inputAudioTranscription).toEqual({});
     expect(setup.outputAudioTranscription).toEqual({});
     expect(setup.realtimeInputConfig).toMatchObject({
@@ -93,7 +94,7 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
 
     expect(creds).toMatchObject({
       provider: 'google',
-      model: 'gemini-2.5-flash-native-audio-latest',
+      model: 'gemini-3.8-live',
       token: 'auth_tokens/ephemeral-abc123',
       apiVersion: 'v1alpha',
       voice: 'Kore',
@@ -153,17 +154,25 @@ describe('ProviderResolverService: live provider choice and fallbacks', () => {
     expect(pi.simulatedParts).toContain('llm');
   });
 
-  it('auto picks OpenAI first, then Google', async () => {
-    expect((await resolve({ openai: { secret: 'o' }, google: { secret: 'g' } }, {})).realtime).toMatchObject({ provider: 'openai', model: 'gpt-realtime' });
+  it('auto picks Gemini Live first, with OpenAI as the backup', async () => {
+    const both = await resolve({ openai: { secret: 'o', source: 'environment' }, google: { secret: 'g', source: 'environment' } }, {});
+    expect(both.realtime).toEqual({
+      provider: 'google',
+      model: 'gemini-3.8-live',
+      source: 'environment',
+      backup: { provider: 'openai', model: 'gpt-realtime-2.1', source: 'environment' },
+    });
     const g = await resolve({ google: { secret: 'g', source: 'environment' } }, {});
     expect(g.voiceMode).toBe('realtime');
-    expect(g.realtime).toEqual({ provider: 'google', model: 'gemini-2.5-flash-native-audio-latest', source: 'environment' });
+    expect(g.realtime).toEqual({ provider: 'google', model: 'gemini-3.8-live', source: 'environment' });
     expect(g.fallbacks).toEqual([]);
+    const o = await resolve({ openai: { secret: 'o', source: 'environment' } }, {});
+    expect(o.realtime).toEqual({ provider: 'openai', model: 'gpt-realtime-2.1', source: 'environment' });
   });
 
   it('preferred provider missing → the other one, recorded as a fallback', async () => {
     const a = await resolve({ google: { secret: 'g' } }, { realtimeProvider: 'openai', realtimeModel: 'gpt-realtime-mini' });
-    expect(a.realtime).toMatchObject({ provider: 'google', model: 'gemini-2.5-flash-native-audio-latest' }); // OpenAI override not applied to Gemini
+    expect(a.realtime).toMatchObject({ provider: 'google', model: 'gemini-3.8-live' }); // OpenAI override not applied to Gemini
     expect(a.fallbacks[0]).toMatch(/OpenAI Realtime was requested.*OPENAI_API_KEY.*using Google Gemini Live instead/);
     const b = await resolve({ openai: { secret: 'o' } }, { realtimeProvider: 'google' });
     expect(b.realtime?.provider).toBe('openai');
@@ -187,11 +196,13 @@ describe('ProviderResolverService: live provider choice and fallbacks', () => {
   });
 
   it('pickLiveProvider / liveModel helpers', () => {
-    expect(pickLiveProvider('auto', { openai: null, google: {} }).provider).toBe('google');
+    expect(pickLiveProvider('auto', { openai: null, google: {} })).toEqual({ provider: 'google', backup: null });
+    expect(pickLiveProvider('auto', { openai: {}, google: {} })).toEqual({ provider: 'google', backup: 'openai' });
+    expect(pickLiveProvider('openai', { openai: {}, google: {} })).toEqual({ provider: 'openai', backup: 'google' });
     expect(pickLiveProvider('google', { openai: {}, google: {} }).provider).toBe('google');
     expect(pickLiveProvider('openai', { openai: null, google: null }).provider).toBeNull();
     expect(liveModel('google', '', 'auto', { realtimeModel: 'gemini-x-live' })).toBe('gemini-x-live');
     expect(liveModel('google', 'gemini-y', 'auto')).toBe('gemini-y');
-    expect(liveModel('openai', 'gemini-y', 'auto')).toBe('gpt-realtime');
+    expect(liveModel('openai', 'gemini-y', 'auto')).toBe('gpt-realtime-2.1');
   });
 });

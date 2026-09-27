@@ -14,7 +14,7 @@ import { isPlausibleSessionToken, safeReturnUrl } from '../src/lib/live/token';
 import { EndOfTurnDetector, isLikelyIncomplete } from '../src/lib/voice/end-of-turn';
 import { isLikelyEcho, SentenceChunker } from '../src/lib/voice/synth';
 import { VadState } from '../src/lib/voice/vad';
-import { planVoice, voiceLabel } from '../src/lib/voice';
+import { planVoice, unavailableKeyFor, voiceLabel } from '../src/lib/voice';
 import { floatToPcm16Base64, heardText } from '../src/lib/voice/gemini-live';
 
 /** Deterministic clock + timers for the detector. */
@@ -279,6 +279,17 @@ test('live voice plan: provider-specific capability checks, labels, heard-text t
   expect(oa.reason).toMatch(/WebRTC/);
   const failed = planVoice({ ...base, realtime: { provider: 'google', model: 'g' } }, caps, { hasMic: true, unavailable: new Set(['realtime']) });
   expect(failed).toMatchObject({ mode: 'browser', reason: 'Live voice is unavailable right now.' });
+  // Gemini Live first, then the OpenAI backup, then browser speech.
+  const all = { ...caps, webrtc: true };
+  const withBackup = { ...base, realtime: { provider: 'google', model: 'g', backup: { provider: 'openai', model: 'o' } } };
+  expect(planVoice(withBackup, all, { hasMic: true })).toMatchObject({ mode: 'realtime', realtimeProvider: 'google' });
+  expect(planVoice(withBackup, all, { hasMic: true, unavailable: new Set(['realtime:google']) })).toMatchObject({ mode: 'realtime', realtimeProvider: 'openai' });
+  expect(planVoice(withBackup, all, { hasMic: true, unavailable: new Set(['realtime:google', 'realtime:openai']) })).toMatchObject({
+    mode: 'browser',
+    reason: 'Live voice is unavailable right now.',
+  });
+  expect(unavailableKeyFor('realtime', 'provider_unavailable', 'google')).toEqual(['realtime:google']);
+  expect(voiceLabel('realtime', { realtime: { provider: 'google', model: 'g' } }, 'openai')).toBe('OpenAI Realtime');
   expect(voiceLabel('realtime', { realtime: { provider: 'google', model: 'g' } })).toBe('Google Gemini Live');
   expect(voiceLabel('realtime', { realtime: { provider: 'openai', model: 'o' } })).toBe('OpenAI Realtime');
   expect(voiceLabel('browser', null)).toBe('Browser speech');

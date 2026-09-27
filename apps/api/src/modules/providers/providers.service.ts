@@ -278,10 +278,10 @@ export class ProvidersService {
     };
     const openaiEnv = !!env.OPENAI_API_KEY;
 
-    // Live speech-to-speech: 'auto' order (openai → google), workspace connections before server keys.
+    // Live speech-to-speech: 'auto' order (google → openai), workspace connections before server keys.
     const liveProviders: Array<{ provider: 'openai' | 'google'; name: string; envKey: boolean; defaultModel: string }> = [
-      { provider: 'openai', name: 'OpenAI Realtime', envKey: openaiEnv, defaultModel: env.OPENAI_REALTIME_MODEL },
       { provider: 'google', name: 'Google Gemini Live', envKey: !!env.GEMINI_API_KEY, defaultModel: env.GEMINI_LIVE_MODEL },
+      { provider: 'openai', name: 'OpenAI Realtime', envKey: openaiEnv, defaultModel: env.OPENAI_REALTIME_MODEL },
     ];
     const realtime = pick(liveProviders.map((l) => ({ provider: l.provider, cap: 'REALTIME' as ProviderKind, envKey: l.envKey })));
     const others = liveProviders.filter((l) => l.provider !== realtime?.provider && (active(l.provider, 'REALTIME') || l.envKey));
@@ -295,7 +295,7 @@ export class ProvidersService {
         model: ((realtime.conn?.config as ProviderConfig | undefined)?.realtimeModel ?? lp.defaultModel) || null,
         simulated: false,
         connectionId: realtime.connectionId,
-        message: `${lp.name} (${realtime.source === 'workspace' ? 'workspace key' : 'server key'}) — default for live conversations${others.length ? `; also available: ${others.map((o) => o.name).join(', ')}` : ''}.`,
+        message: `${lp.name} (${realtime.source === 'workspace' ? 'workspace key' : 'server key'}) — default for live conversations${others.length ? `; backup: ${others.map((o) => o.name).join(', ')}` : ''}; browser speech is the last resort.`,
       });
     } else {
       out.push({

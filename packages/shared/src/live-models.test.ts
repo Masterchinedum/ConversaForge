@@ -7,7 +7,7 @@ describe('live speech-to-speech model config', () => {
     const c = defaultScenarioConfig();
     expect(c.model.voiceMode).toBe('realtime');
     expect(c.model.realtimeProvider).toBe('auto');
-    expect(REALTIME_PROVIDERS).toEqual(['auto', 'openai', 'google']);
+    expect(REALTIME_PROVIDERS).toEqual(['auto', 'google', 'openai']);
     expect(LLM_PROVIDERS).toContain('google');
   });
 

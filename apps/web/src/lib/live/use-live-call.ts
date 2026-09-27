@@ -120,7 +120,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
       voiceRef.current = vc;
       setVoicePlan(plan);
       setVoiceMode(vc.mode);
-      setVoiceLabel(vc.label ?? labelFor(vc.mode, config));
+      setVoiceLabel(vc.label ?? labelFor(vc.mode, config, plan.realtimeProvider));
       const wantedLive = (config.requestedVoiceMode ?? config.voiceMode) === 'realtime';
       setLiveFallback(wantedLive && vc.mode !== 'realtime' && !devices.preferTyped && !choseTyping.current);
       if (plan.reason && !replan && vc.mode !== 'realtime') dispatch({ type: 'notice', level: 'info', message: plan.reason });
@@ -166,7 +166,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
             dispatch({ type: 'notice', level: 'warning', message: err.message });
             return;
           }
-          for (const k of unavailableKeyFor(vc.mode, err.code)) unavailable.current.add(k);
+          for (const k of unavailableKeyFor(vc.mode, err.code, plan.realtimeProvider)) unavailable.current.add(k);
           send({ type: 'client.event', name: 'voice.fallback', data: { from: vc.mode, code: err.code } });
           // Re-plan on the next tick (don't tear down an adapter from inside its own callback).
           setTimeout(() => {

@@ -303,7 +303,7 @@ function ConfigFields({ provider, config, setConfig, info }: { provider: string;
       )}
       {provider === 'openai' && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Realtime model" hint="Default: gpt-realtime">
+          <Field label="Realtime model" hint="Default: gpt-realtime-2.1 (backup live model)">
             {(id) => <Input id={id} value={config.realtimeModel ?? ''} onChange={(e) => set('realtimeModel', e.target.value.trim())} placeholder="(server default)" />}
           </Field>
           <Field label="Voice" hint="e.g. alloy, verse, coral">
@@ -313,7 +313,7 @@ function ConfigFields({ provider, config, setConfig, info }: { provider: string;
       )}
       {provider === 'google' && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Gemini Live model" hint="Default: gemini-2.5-flash-native-audio-latest">
+          <Field label="Gemini Live model" hint="Default: gemini-3.8-live (default live model)">
             {(id) => <Input id={id} value={config.realtimeModel ?? ''} onChange={(e) => set('realtimeModel', e.target.value.trim())} placeholder="(server default)" />}
           </Field>
           <Field label="Voice" hint="Gemini prebuilt voice, e.g. Kore, Puck, Zephyr, Charon">

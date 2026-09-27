@@ -53,14 +53,14 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_LIVE_MODEL: z.string().default('gpt-4.1-mini'),
   OPENAI_ANALYSIS_MODEL: z.string().default('gpt-4.1'),
-  OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime'),
+  OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime-2.1'),
   OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
   OPENAI_STT_MODEL: z.string().default('gpt-4o-mini-transcribe'),
   /** Google Gemini Developer API key (GOOGLE_API_KEY accepted as an alias; see loadEnv). */
   GEMINI_API_KEY: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),
-  /** Gemini Live (speech-to-speech) model used with ephemeral tokens in the browser. */
-  GEMINI_LIVE_MODEL: z.string().default('gemini-2.5-flash-native-audio-latest'),
+  /** Gemini Live (speech-to-speech) model used with ephemeral tokens in the browser — the default live model. */
+  GEMINI_LIVE_MODEL: z.string().default('gemini-3.8-live'),
   /** Gemini text model for live conversations in pipeline mode. */
   GEMINI_TEXT_MODEL: z.string().default('gemini-2.5-flash'),
   /** Gemini text model for analysis / drafting assistant / coach memory. */

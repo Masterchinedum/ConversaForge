@@ -324,7 +324,7 @@ const LLM_PROVIDER_LABELS: Record<string, string> = {
   simulator: 'Local simulator (no key)',
 };
 const LIVE_PROVIDER_LABELS: Record<string, string> = {
-  auto: 'Auto (first configured: OpenAI, then Google)',
+  auto: 'Auto (Gemini Live, then OpenAI as backup)',
   openai: 'OpenAI Realtime',
   google: 'Google Gemini Live',
 };
@@ -351,15 +351,15 @@ export function ModelSection() {
             path="model.realtimeProvider"
             label="Live provider"
             options={REALTIME_PROVIDERS.map((p) => ({ value: p, label: LIVE_PROVIDER_LABELS[p] ?? p }))}
-            hint="If the chosen provider has no key, the other live provider is used, then the pipeline."
+            hint="If the chosen provider has no key or fails during the call, the other live provider is used, then browser speech (pipeline)."
           />
         )}
         {live && (
           <TextField
             path="model.realtimeModel"
             label="Live model"
-            placeholder={liveProvider === 'google' ? 'server default (GEMINI_LIVE_MODEL)' : liveProvider === 'openai' ? 'server default (gpt-realtime)' : 'server default for the chosen provider'}
-            hint="Optional override, e.g. gpt-realtime or gemini-2.5-flash-native-audio-latest. Only applied when it matches the provider in use."
+            placeholder={liveProvider === 'openai' ? 'server default (gpt-realtime-2.1)' : liveProvider === 'google' ? 'server default (gemini-3.8-live)' : 'server default (gemini-3.8-live, backup gpt-realtime-2.1)'}
+            hint="Optional override, e.g. gemini-3.8-live or gpt-realtime-2.1. Only applied when it matches the provider in use."
           />
         )}
         <SelectField

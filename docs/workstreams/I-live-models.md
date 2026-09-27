@@ -15,8 +15,8 @@ provider too**, so a customer with only a Google key gets a fully working produc
 
 | Area | Files |
 |---|---|
-| Shared config (additive) | `packages/shared/src/scenario-config.ts`: `model.voiceMode` default **`realtime`**; `model.realtimeProvider` ∈ `auto \| openai \| google` (default **`auto`**); `model.llmProvider` gains `google`; publish warnings for a live-model override that doesn't match the chosen provider and for live voice + phone/meeting channels. `protocol.ts`: `ClientRuntimeConfig.realtime.provider` is `openai \| google`, new optional `requestedVoiceMode`. Existing versions that say `openai`/`pipeline` are unchanged. |
-| Env | `GEMINI_API_KEY` (alias `GOOGLE_API_KEY`), `GEMINI_LIVE_MODEL` (default `gemini-2.5-flash-native-audio-latest`), `GEMINI_TEXT_MODEL` (`gemini-2.5-flash`), `GEMINI_ANALYSIS_MODEL` (`gemini-2.5-pro`), `GEMINI_BASE_URL` (proxies/tests) — `apps/api/src/config/env.ts`, `/.env.example` |
+| Shared config (additive) | `packages/shared/src/scenario-config.ts`: `model.voiceMode` default **`realtime`**; `model.realtimeProvider` ∈ `auto \| google \| openai` (default **`auto`**); `model.llmProvider` gains `google`; publish warnings for a live-model override that doesn't match the chosen provider and for live voice + phone/meeting channels. `protocol.ts`: `ClientRuntimeConfig.realtime.provider` is `openai \| google`, new optional `requestedVoiceMode`. Existing versions that say `openai`/`pipeline` are unchanged. |
+| Env | `GEMINI_API_KEY` (alias `GOOGLE_API_KEY`), `GEMINI_LIVE_MODEL` (default `gemini-3.8-live`; `OPENAI_REALTIME_MODEL` backup default `gpt-realtime-2.1`), `GEMINI_TEXT_MODEL` (`gemini-2.5-flash`), `GEMINI_ANALYSIS_MODEL` (`gemini-2.5-pro`), `GEMINI_BASE_URL` (proxies/tests) — `apps/api/src/config/env.ts`, `/.env.example` |
 | Google text LLM | `apps/api/src/common/llm/google.provider.ts` (`GoogleProvider`: `streamChat`, `completeJson`), wired in `llm.service.ts` (`resolve`, `defaultModel`, `availability().google`, `providerSecret(ws,'google', capability?)`) |
 | Provider connections | `modules/providers/provider-catalog.ts` (`google`: LLM + REALTIME), `provider-verify.ts` (models.list), `providers.service.ts` (status rows: live voice lists OpenAI/Google, settings keep `liveModel/analysisModel/realtimeModel/voice`); web `settings/providers/page.tsx` |
 | Resolver | `modules/runtime/voice/provider-resolver.service.ts` (`pickLiveProvider`, `liveModel`, fallback reasons) |
@@ -31,7 +31,9 @@ provider too**, so a customer with only a Google key gets a fully working produc
 ### Provider resolution (`providerInfo`)
 - `voiceMode:'realtime'` requested:
   - phone/meeting channel → `pipeline` + reason ("browser only").
-  - `realtimeProvider:'auto'` → first provider with a live credential in the order **openai → google**.
+  - `realtimeProvider:'auto'` → first provider with a live credential in the order **google → openai**; the next
+    configured one is recorded as `providerInfo.realtime.backup` and used if the first fails in the browser
+    (the adapter asks `realtime-token` with `provider:<backup>`, which switches the session and re-sends the history).
   - `'openai'`/`'google'` → that provider if configured, otherwise **the other one** with a reason
     ("Google Gemini Live was requested but no Google key (GEMINI_API_KEY …) is configured; using OpenAI Realtime instead."),
     otherwise `pipeline` with a reason.
@@ -39,7 +41,7 @@ provider too**, so a customer with only a Google key gets a fully working produc
     checked (or has no capability list), else the server env key.
   - Model: the scenario's `realtimeModel` when it belongs to the chosen provider (`gemini…` ↔ Google), else
     the connection's `realtimeModel`, else `OPENAI_REALTIME_MODEL` / `GEMINI_LIVE_MODEL`.
-- Recorded as `providerInfo.realtime = { provider, model, source }`, `requestedRealtimeProvider`,
+- Recorded as `providerInfo.realtime = { provider, model, source, backup? }`, `requestedRealtimeProvider`,
   `requestedVoiceMode`, `fallbacks[]`; the client gets `config.realtime`, `config.requestedVoiceMode`.
 - Text LLM: `LlmService.resolve(ws, purpose, preferred)` → preferred first, then anthropic → openai → google
   (workspace connection with `kind:'LLM'` first, then env key), else the simulator. Google defaults:

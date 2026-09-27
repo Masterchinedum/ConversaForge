@@ -51,8 +51,11 @@ export interface ClientRuntimeConfig {
   /** True when any part of the pipeline is the local development simulator. */
   simulated: boolean;
   simulatedParts: string[];
-  /** Live speech-to-speech provider actually used (voiceMode 'realtime' only). */
-  realtime?: { provider: RealtimeProviderId; model: string };
+  /**
+   * Live speech-to-speech provider actually used (voiceMode 'realtime' only). `backup` is the other
+   * configured live provider, tried in the browser before falling back to browser/server speech.
+   */
+  realtime?: { provider: RealtimeProviderId; model: string; backup?: { provider: RealtimeProviderId; model: string } };
   /** (additive) The voice mode the scenario asked for; differs from voiceMode after a server-side fallback. */
   requestedVoiceMode?: VoiceMode;
   branding?: { displayName?: string; logoUrl?: string; primaryColor?: string; hidePoweredBy?: boolean };

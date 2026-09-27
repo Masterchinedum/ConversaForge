@@ -111,9 +111,10 @@ export const TTS_PROVIDERS = ['browser', 'openai', 'elevenlabs', 'none'] as cons
 export type TtsProviderId = (typeof TTS_PROVIDERS)[number];
 /**
  * Live speech-to-speech providers. 'auto' = the first live provider with a configured credential, in the
- * order openai → google (workspace connection first, then server env key); none → pipeline fallback.
+ * order google → openai (workspace connection first, then server env key). The other configured provider
+ * is the runtime backup; with neither (or both failing) the session falls back to the speech pipeline.
  */
-export const REALTIME_PROVIDERS = ['auto', 'openai', 'google'] as const;
+export const REALTIME_PROVIDERS = ['auto', 'google', 'openai'] as const;
 export type RealtimeProviderChoice = (typeof REALTIME_PROVIDERS)[number];
 /** A concrete live-model provider (what a session actually uses). */
 export type RealtimeProviderId = Exclude<RealtimeProviderChoice, 'auto'>;
@@ -223,8 +224,8 @@ export const ScenarioConfigSchema = z.object({
   model: z
     .object({
       /**
-       * 'realtime' (default) = live speech-to-speech model (OpenAI Realtime / Google Gemini Live); the
-       * runtime falls back to 'pipeline' (STT → LLM → TTS) when no live-model credential is configured.
+       * 'realtime' (default) = live speech-to-speech model (Google Gemini Live, then OpenAI as backup); the
+       * runtime falls back to 'pipeline' (STT → LLM → TTS) when no live model is configured or both fail.
        */
       voiceMode: z.enum(VOICE_MODES).default('realtime'),
       llmProvider: z.enum(LLM_PROVIDERS).default('anthropic'),

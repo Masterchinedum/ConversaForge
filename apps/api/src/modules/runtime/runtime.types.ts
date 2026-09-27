@@ -13,6 +13,12 @@ export interface ConsentRecord {
   source?: string;
 }
 
+export interface LiveProviderPick {
+  provider: RealtimeProviderId;
+  model: string;
+  source?: 'workspace' | 'environment';
+}
+
 /** Stored in Session.providerInfo. Describes what the runtime will use for this session. */
 export interface ProviderInfo {
   voiceMode: VoiceMode;
@@ -21,9 +27,12 @@ export interface ProviderInfo {
   llm: { provider: LlmProviderId; model: string; source: 'workspace' | 'environment' | 'simulator' };
   stt: SttProviderId;
   tts: TtsProviderId;
-  /** Live speech-to-speech provider actually used (voiceMode 'realtime'). */
-  realtime?: { provider: RealtimeProviderId; model: string; source?: 'workspace' | 'environment' };
-  /** The live provider the scenario asked for ('auto' = first configured: openai → google). */
+  /**
+   * Live speech-to-speech provider actually used (voiceMode 'realtime'). `backup` is the next configured
+   * live provider; the browser switches to it (via the realtime-token route) if the first one fails.
+   */
+  realtime?: LiveProviderPick & { backup?: LiveProviderPick };
+  /** The live provider the scenario asked for ('auto' = first configured: google → openai). */
   requestedRealtimeProvider?: RealtimeProviderChoice;
   simulated: boolean;
   simulatedParts: string[];

@@ -150,12 +150,12 @@ export interface RealtimeCredentials {
 }
 
 export async function fetchRealtimeToken(sessionId: string, token: string): Promise<RealtimeCredentials> {
-  const r: any = await api(`${base(sessionId)}/realtime-token`, { method: 'POST', token, body: {} });
+  const r: any = await api(`${base(sessionId)}/realtime-token`, { method: 'POST', token, body: { provider: 'openai' } });
   const secret = pick<string>(r?.clientSecret, r?.client_secret?.value, r?.value, r?.token, r?.ephemeralKey);
   if (!secret) throw new ApiError(502, 'realtime_unavailable', 'No realtime credentials returned');
   return {
     clientSecret: secret,
-    model: pick<string>(r?.model, r?.session?.model) ?? 'gpt-realtime',
+    model: pick<string>(r?.model, r?.session?.model) ?? 'gpt-realtime-2.1',
     callsUrl: pick<string>(r?.callsUrl, r?.url, r?.sdpUrl) ?? 'https://api.openai.com/v1/realtime/calls',
     expiresAt: pick(r?.expiresAt, r?.expires_at, r?.client_secret?.expires_at),
   };
@@ -184,7 +184,7 @@ export async function fetchGeminiToken(
   token: string,
   opts: { resumeHandle?: string; reconnect?: boolean } = {},
 ): Promise<GeminiLiveCredentials> {
-  const body: Record<string, unknown> = {};
+  const body: Record<string, unknown> = { provider: 'google' };
   if (opts.resumeHandle) body.resumeHandle = opts.resumeHandle;
   if (opts.reconnect) body.reconnect = true;
   const r: any = await api(`${base(sessionId)}/realtime-token`, { method: 'POST', token, body });
@@ -192,7 +192,7 @@ export async function fetchGeminiToken(
   if (r?.provider !== 'google' || !eph) throw new ApiError(502, 'realtime_unavailable', 'No Gemini Live credentials returned');
   return {
     provider: 'google',
-    model: pick<string>(r?.model) ?? 'gemini-2.5-flash-native-audio-latest',
+    model: pick<string>(r?.model) ?? 'gemini-3.8-live',
     token: eph,
     apiVersion: pick<string>(r?.apiVersion) ?? 'v1alpha',
     expiresAt: r?.expiresAt,

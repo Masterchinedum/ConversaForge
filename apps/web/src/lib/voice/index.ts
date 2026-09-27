@@ -2,7 +2,7 @@
  * Voice adapter selection: ClientRuntimeConfig (voiceMode / stt / tts) + browser capabilities.
  */
 
-import type { ClientRuntimeConfig } from '@cf/shared';
+import type { ClientRuntimeConfig, RealtimeProviderId } from '@cf/shared';
 import { BrowserSpeechAdapter, getSpeechRecognitionCtor } from './browser-speech';
 import { GeminiLiveAdapter } from './gemini-live';
 import { hasWebRtc, OpenAIRealtimeAdapter } from './openai-realtime';
@@ -54,6 +54,8 @@ export interface VoicePlan {
   mode: VoiceMode;
   /** How agent speech is produced. */
   output: 'browser' | 'server' | 'realtime' | 'none';
+  /** Live provider for mode 'realtime' (the session's primary, or its backup after a failure). */
+  realtimeProvider?: RealtimeProviderId;
   /** Why we did not use the configured mode (shown as a notice). */
   reason?: string;
 }
@@ -80,13 +82,24 @@ export function planVoice(
   if (!opts.hasMic) reasons.push('No microphone is available, so you can type your answers.');
 
   if (opts.hasMic && config.voiceMode === 'realtime') {
-    const google = config.realtime?.provider === 'google';
-    const supported = google ? caps.audioContext && caps.websocket !== false : caps.webrtc;
-    if (supported && !un.has('realtime')) return { mode: 'realtime', output: 'realtime' };
+    // Live providers in order: the session's primary (Gemini Live by default), then its backup (OpenAI).
+    const primary = config.realtime?.provider ?? 'openai';
+    const candidates = [primary, ...(config.realtime?.backup ? [config.realtime.backup.provider] : [])];
+    const supports = (p: RealtimeProviderId) => (p === 'google' ? caps.audioContext && caps.websocket !== false : caps.webrtc);
+    const usable = candidates.find((p) => supports(p) && !un.has(`realtime:${p}`) && !un.has('realtime'));
+    if (usable) {
+      return {
+        mode: 'realtime',
+        output: 'realtime',
+        realtimeProvider: usable,
+        ...(usable !== primary && !un.has(`realtime:${primary}`) ? { reason: `${voiceLabel('realtime', null, primary)} is not supported in this browser.` } : {}),
+      };
+    }
+    const failed = candidates.some((p) => un.has(`realtime:${p}`)) || un.has('realtime');
     reasons.push(
-      un.has('realtime')
+      failed
         ? 'Live voice is unavailable right now.'
-        : google
+        : primary === 'google'
           ? 'This browser cannot play live audio (WebAudio/WebSocket missing).'
           : 'This browser does not support WebRTC.',
     );
@@ -122,7 +135,7 @@ export function createVoiceClient(
 ): VoiceClient {
   switch (plan.mode) {
     case 'realtime':
-      return config.realtime?.provider === 'google' ? new GeminiLiveAdapter(o) : new OpenAIRealtimeAdapter(o, extra);
+      return (plan.realtimeProvider ?? config.realtime?.provider) === 'google' ? new GeminiLiveAdapter(o) : new OpenAIRealtimeAdapter(o, extra);
     case 'server':
       return new ServerPipelineAdapter(o, createSpeaker(plan, config, o));
     case 'browser':
@@ -132,17 +145,24 @@ export function createVoiceClient(
   }
 }
 
-/** Which capability to mark unavailable when an adapter reports a fallback error. */
-export function unavailableKeyFor(mode: VoiceMode, code: string): string[] {
+/**
+ * Which capability to mark unavailable when an adapter reports a fallback error. A failed live provider is
+ * marked on its own, so the re-plan tries the backup live provider before browser/server speech.
+ */
+export function unavailableKeyFor(mode: VoiceMode, code: string, realtimeProvider?: RealtimeProviderId): string[] {
   if (code === 'tts_failed') return ['server_tts'];
-  if (mode === 'realtime') return ['realtime'];
+  if (mode === 'realtime') return [realtimeProvider ? `realtime:${realtimeProvider}` : 'realtime'];
   if (mode === 'server') return code === 'provider_unavailable' ? ['server_stt', 'server_tts'] : ['server_stt'];
   if (mode === 'browser') return ['browser_stt'];
   return [];
 }
 
 /** "Voice:" label for a mode; live voice names the provider actually used. */
-export function voiceLabel(mode: VoiceMode, config?: Pick<ClientRuntimeConfig, 'realtime'> | null): string {
-  if (mode === 'realtime') return config?.realtime?.provider === 'google' ? 'Google Gemini Live' : 'OpenAI Realtime';
+export function voiceLabel(
+  mode: VoiceMode,
+  config?: Pick<ClientRuntimeConfig, 'realtime'> | null,
+  provider: RealtimeProviderId | undefined = config?.realtime?.provider,
+): string {
+  if (mode === 'realtime') return provider === 'google' ? 'Google Gemini Live' : 'OpenAI Realtime';
   return VOICE_MODE_LABELS[mode];
 }
