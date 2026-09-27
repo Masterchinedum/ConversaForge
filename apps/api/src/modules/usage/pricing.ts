@@ -62,7 +62,7 @@ export function estimateCostMicros(kind: UsageKind, provider: string, model: str
       usd = ((p.perMChars ?? 0) * quantity) / 1_000_000;
       break;
     case 'STORAGE_BYTES':
-      usd = (0.023 * quantity) / 1e9; // ~S3 standard per GB-month
+      usd = (0.015 * quantity) / 1e9; // ~R2 standard per GB-month
       break;
     case 'SESSION_SECONDS':
       usd = 0;

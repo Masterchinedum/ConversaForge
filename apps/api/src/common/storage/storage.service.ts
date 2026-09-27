@@ -18,7 +18,7 @@ export interface StorageDriver {
   stream(key: string): Promise<Readable>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
-  /** A URL the browser can fetch directly (S3 presigned) or null to use the API's signed proxy route. */
+  /** A URL the browser can fetch directly (R2 presigned) or null to use the API's signed proxy route. */
   presignGet?(key: string, ttlSeconds: number, fileName?: string, mimeType?: string): Promise<string>;
 }
 
@@ -55,25 +55,26 @@ class LocalDriver implements StorageDriver {
   }
 }
 
-class S3Driver implements StorageDriver {
+/**
+ * Cloudflare R2 via its S3-compatible API. R2 encrypts every object at rest and rejects the
+ * x-amz-server-side-encryption header, so none is sent.
+ */
+class R2Driver implements StorageDriver {
   private readonly client: S3Client;
-  /** Cloudflare R2 rejects x-amz-server-side-encryption (it always encrypts at rest), so only send it elsewhere. */
-  private readonly sse = /\.r2\.cloudflarestorage\.com/i.test(env.S3_ENDPOINT ?? '') ? undefined : ('AES256' as const);
-  constructor(private readonly bucket: string) {
+  constructor(
+    private readonly bucket: string,
+    accountId: string,
+    accessKeyId: string,
+    secretAccessKey: string,
+  ) {
     this.client = new S3Client({
-      region: env.S3_REGION ?? 'auto',
-      endpoint: env.S3_ENDPOINT,
-      forcePathStyle: env.S3_FORCE_PATH_STYLE,
-      credentials:
-        env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
-          ? { accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY }
-          : undefined,
+      region: 'auto',
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId, secretAccessKey },
     });
   }
   async put(key: string, body: Buffer, contentType: string) {
-    await this.client.send(
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: this.sse }),
-    );
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
   }
   async get(key: string) {
     const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
@@ -152,9 +153,12 @@ export class StorageService {
   readonly driver: StorageDriver;
 
   constructor(private readonly crypto: CryptoService) {
-    if (env.STORAGE_DRIVER === 's3') {
-      if (!env.S3_BUCKET) throw new Error('S3_BUCKET is required when STORAGE_DRIVER=s3');
-      this.driver = new S3Driver(env.S3_BUCKET);
+    if (env.STORAGE_DRIVER === 'r2') {
+      const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME } = env;
+      if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
+        throw new Error('R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME are required when STORAGE_DRIVER=r2');
+      }
+      this.driver = new R2Driver(R2_BUCKET_NAME, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY);
     } else {
       this.driver = new LocalDriver(path.resolve(env.STORAGE_LOCAL_DIR));
     }
@@ -186,7 +190,7 @@ export class StorageService {
 
   /**
    * Signed URL for a media asset. Callers MUST have authorized access to the asset first.
-   * S3: presigned object URL. Local: API route /api/media/signed/<token> verified by HMAC.
+   * R2: presigned object URL. Local: API route /api/media/signed/<token> verified by HMAC.
    */
   async signedUrl(asset: { id: string; storageKey: string; workspaceId: string; fileName?: string | null; mimeType?: string | null }, ttlSeconds = 900) {
     this.assertWorkspaceKey(asset.workspaceId, asset.storageKey);

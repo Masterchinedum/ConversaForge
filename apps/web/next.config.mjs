@@ -28,7 +28,7 @@ function csp({ embed }) {
     'script-src': ["'self'", "'unsafe-inline'", 'blob:', ...(dev ? ["'unsafe-eval'"] : [])],
     'style-src': ["'self'", "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', 'blob:', 'https:', ...apiOrigins.filter((o) => o.startsWith('http'))],
-    // Signed media URLs may point at the API origin or an S3/R2 bucket (https).
+    // Signed media URLs may point at the API origin or the R2 bucket (https).
     'media-src': ["'self'", 'blob:', 'data:', 'https:', ...apiOrigins.filter((o) => o.startsWith('http'))],
     // WebSocket to the API; live speech-to-speech: OpenAI Realtime SDP exchange and the Gemini Live
     // WebSocket (browser → Google with a short-lived ephemeral token).

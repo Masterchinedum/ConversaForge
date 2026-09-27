@@ -37,14 +37,14 @@ const EnvSchema = z.object({
   TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
 
-  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  /** Media storage: local disk (dev) or a Cloudflare R2 bucket. */
+  STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
-  S3_BUCKET: z.string().optional(),
-  S3_REGION: z.string().optional(),
-  S3_ENDPOINT: z.string().optional(),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_FORCE_PATH_STYLE: bool,
+  /** Cloudflare R2 (STORAGE_DRIVER=r2): R2 dashboard → Manage API tokens (Object Read & Write). */
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET_NAME: z.string().optional(),
 
   // ── AI providers (all optional; workspace-level keys in ProviderConnection take precedence) ──
   ANTHROPIC_API_KEY: z.string().optional(),

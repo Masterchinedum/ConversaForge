@@ -121,7 +121,7 @@ See [`DEPLOYMENT.md`](DEPLOYMENT.md): Docker images (`infra/docker/*.Dockerfile`
 4. OCR and semantic search for knowledge.
 5. Horizontal scaling of live sessions needs sticky routing on `/ws/session` (engines are in-process).
 6. External penetration test before handling real hiring decisions; keep "Require human review" on for interviews.
-7. Recording finalization concatenates parts in memory (capped at 400 MB per recording); switch to S3 multipart streaming for long video sessions.
+7. Recording finalization concatenates parts in memory (capped at 400 MB per recording); switch to R2 multipart streaming for long video sessions.
 8. Minor UX: stale "Uploaded" badge on the knowledge page until refresh; a nonce-based CSP (removing `'unsafe-inline'` for scripts) via Next middleware.
 9. Realtime (speech-to-speech) mode — OpenAI Realtime and Gemini Live alike — relays transcripts through the participant's browser, so its transcripts are not tamper-proof; use the pipeline mode for high-stakes assessments (see `SECURITY_REVIEW.md`).
 10. Gemini Live: verify with a real key that the locked token setup, transcription timing, goAway/resumption and voice names behave as implemented (see [I](workstreams/I-live-models.md)); Gemini price rows are estimates.

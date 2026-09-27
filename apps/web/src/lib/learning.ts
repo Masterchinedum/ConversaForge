@@ -108,7 +108,7 @@ export function ruleLabel(rule: CompletionRule): string {
 
 /**
  * Signed media URLs served by the API's local driver are made same-origin (through the web proxy) so
- * PDFs can be shown in an iframe; S3 presigned URLs are left untouched.
+ * PDFs can be shown in an iframe; R2 presigned URLs are left untouched.
  */
 export function sameOriginMediaUrl(url: string): string {
   try {

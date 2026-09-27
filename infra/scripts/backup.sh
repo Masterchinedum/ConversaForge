@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nightly backup: Postgres dump + local media storage (skip storage when using S3 — use bucket versioning/replication).
+# Nightly backup: Postgres dump + local media storage (skip storage when using R2 — it lives in the bucket).
 # Usage: infra/scripts/backup.sh [backup_dir]   (run on the host next to infra/docker-compose.prod.yml)
 set -euo pipefail
 DIR="${1:-./backups}"

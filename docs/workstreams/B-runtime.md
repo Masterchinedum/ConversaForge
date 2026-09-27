@@ -159,4 +159,4 @@ AGENT: Good question — the team will follow up with details on that. Thanks fo
 - The simulator is rule-based: phrasing of agenda topics written as noun phrases can sound mechanical ("I'd like to hear about brief introduction and current role").
 - Engines are per-process; multi-instance deployments need session affinity for `/ws/session` (not yet in DEPLOYMENT.md — lead to add).
 - Server-side TTS streaming over the WS (`agent.audio`) is not used by the browser pipeline; phone (H) calls `SpeechService` directly.
-- Recording concatenation happens in memory (≤ 400 MB cap per asset); a streaming multipart upload to S3 would scale better.
+- Recording concatenation happens in memory (≤ 400 MB cap per asset); a streaming multipart upload to R2 would scale better.

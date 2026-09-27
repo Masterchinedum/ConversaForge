@@ -65,12 +65,12 @@ Severity reflects the impact in this multi-tenant SaaS: H = cross-user data or a
 
 ### M-2 Media proxy echoed the stored MIME type inline on the app origin
 
-- **Where:** `modules/media/media.controller.ts` and `common/storage/storage.service.ts` (S3 presign). The web app proxies `/api/*`, so media is same-origin with the app.
+- **Where:** `modules/media/media.controller.ts` and `common/storage/storage.service.ts` (R2 presign). The web app proxies `/api/*`, so media is same-origin with the app.
 - **Impact:** Any current or future upload path that stores an active type (`text/html`, `image/svg+xml`, XML) would become stored XSS on the app origin, with access to session cookies' requests and to participant tokens in local storage. The current upload paths sniff content, so this is defence in depth, but the proxy trusted a database field.
 - **Fix:**
   - `safeServeType()` keeps an inline allowlist of passive types: raster images, audio/video, PDF, and text (served as `text/plain; charset=utf-8`). Everything else is served as `application/octet-stream` with `Content-Disposition: attachment`.
   - Added `Content-Security-Policy: default-src 'none'; …; sandbox` (not applied to PDFs, which browser viewers refuse to render when sandboxed) and `Referrer-Policy: no-referrer`.
-  - The same policy applies to S3 presigned URLs (`ResponseContentType` and `ResponseContentDisposition`).
+  - The same policy applies to R2 presigned URLs (`ResponseContentType` and `ResponseContentDisposition`).
 - **Verified live:** a Markdown document containing `<script>` is served as `text/plain` with a sandbox CSP.
 
 ### M-3 Client-relayed realtime tool calls were unthrottled

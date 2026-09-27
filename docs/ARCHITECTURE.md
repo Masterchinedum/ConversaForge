@@ -11,7 +11,7 @@ Read it fully before changing code.
 | API | NestJS 11 on Fastify 5, Zod validation, `@nestjs/platform-ws` WebSockets |
 | DB | PostgreSQL 16 via Prisma 6 |
 | Jobs | BullMQ on Redis/Valkey (worker can run in-process or as `node dist/worker.js`) |
-| Storage | Local disk (dev) or any S3-compatible bucket; tenant-prefixed keys, signed URLs |
+| Storage | Local disk (dev) or a Cloudflare R2 bucket; tenant-prefixed keys, signed URLs |
 | AI | Provider adapters: Anthropic (Claude), OpenAI (LLM, Realtime voice, TTS/STT), Google Gemini (`@google/genai`: LLM, Gemini Live voice), local **simulator**. Live conversations default to a speech-to-speech model (OpenAI Realtime / Gemini Live) with automatic fallback to the STT → LLM → TTS pipeline |
 | Shared | `packages/shared` (`@cf/shared`): scenario schema, validation, scoring math, variables, state machine, WS protocol, tool catalog |
 

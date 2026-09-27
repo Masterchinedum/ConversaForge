@@ -9,7 +9,7 @@ import { contentDispositionHeader, safeServeType, StorageService } from '../../c
 
 /**
  * Serves local-driver media through HMAC-signed, expiring URLs issued by StorageService.signedUrl()
- * after an authorization check. (With the S3 driver, presigned bucket URLs are used instead.)
+ * after an authorization check. (With the R2 driver, presigned bucket URLs are used instead.)
  * Supports HTTP Range requests so <audio>/<video> can seek.
  */
 @ApiExcludeController()

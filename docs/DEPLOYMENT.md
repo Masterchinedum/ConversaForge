@@ -1,6 +1,6 @@
 # Deployment, operations, monitoring & rollback
 
-ConversaForge runs as four processes: **web** (Next.js), **api** (NestJS/Fastify, HTTP + WebSocket), **worker** (BullMQ jobs: analysis pipeline, knowledge ingestion, webhooks, channels, maintenance), plus **PostgreSQL 16** and **Redis-compatible** storage (Valkey). Media goes to local disk (single host) or any S3-compatible bucket (recommended).
+ConversaForge runs as four processes: **web** (Next.js), **api** (NestJS/Fastify, HTTP + WebSocket), **worker** (BullMQ jobs: analysis pipeline, knowledge ingestion, webhooks, channels, maintenance), plus **PostgreSQL 16** and **Redis-compatible** storage (Valkey). Media goes to local disk (single host) or a Cloudflare R2 bucket (recommended).
 
 ## 1. Single-host production (Docker Compose)
 
@@ -34,7 +34,7 @@ Required settings in `.env.production`:
 | `SIGNING_SECRET` | `openssl rand -base64 48` |
 | `COOKIE_SECURE` | `true` |
 | `ALLOW_SIMULATOR` | `false` (never serve simulated conversations to real users) |
-| `STORAGE_DRIVER` | `s3` recommended (`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` for R2/MinIO, keys) |
+| `STORAGE_DRIVER` | `r2` recommended, with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | at least one, or configure per workspace in Settings → AI providers |
 | `SMTP_URL`, `MAIL_FROM` | for invitations, password resets and notifications |
 
@@ -61,7 +61,7 @@ Any container platform works (Fly.io, Render, ECS, Kubernetes): run the same `ap
 
 ## 5. Backups & recovery
 - `infra/scripts/backup.sh` — nightly `pg_dump` (custom format) + local media tarball, 14-day retention. Schedule with cron: `15 2 * * * /opt/conversaforge/infra/scripts/backup.sh /var/backups/conversaforge`. Copy backups off-host (e.g. `rclone` to object storage).
-- With S3 storage, enable bucket versioning and lifecycle rules instead of tarballs.
+- With R2 storage, use bucket lifecycle rules (and a second bucket / Super Slurper copy if you need off-site copies) instead of tarballs.
 - Managed Postgres: enable point-in-time recovery.
 - **Restore drill** (do it before launch and quarterly): `infra/scripts/restore.sh backups/db-<ts>.dump` on a staging host, then log in and open a recent session report.
 - Keep `ENCRYPTION_KEY` and `SIGNING_SECRET` in a secrets manager; they are required to read restored provider keys and to validate existing signed links.
@@ -78,7 +78,7 @@ Any container platform works (Fly.io, Render, ECS, Kubernetes): run the same `ap
 - HTTPS only (`COOKIE_SECURE=true`), HSTS via Caddy.
 - `ALLOW_SIMULATOR=false`.
 - Strong `ENCRYPTION_KEY`/`SIGNING_SECRET`, rotated credentials for DB/Redis, Redis not exposed publicly.
-- S3 bucket private (no public ACLs); media is only served through short-lived signed URLs.
+- R2 bucket private (no public r2.dev URL or custom domain); media is only served through short-lived signed URLs.
 - Configure SMTP with SPF/DKIM for your sending domain.
 - Review provider data-processing terms (Anthropic/OpenAI/Deepgram/ElevenLabs/Twilio/Recall) and your consent notice text; browser speech recognition (Chrome) sends audio to the browser vendor's speech service — the consent screen discloses this.
 - Hiring use: keep "Require human review" on for interview scenarios; scores are advisory.
