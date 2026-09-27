@@ -29,10 +29,13 @@ Demo users (after seeding; password `demo-password-123`): `owner@demo.test`, `ad
 ### AI providers and cost control
 No provider key is required to try the product: without one, conversations, analysis and the drafting assistant run on a **local simulator** that is clearly labeled everywhere ("Simulated"). For real conversations add **one** of:
 
-- `ANTHROPIC_API_KEY` (Claude) — language model for live turns, analysis and drafting. Voice uses the browser's speech recognition/synthesis (Chrome/Edge), so this is the only paid component.
-- `OPENAI_API_KEY` — optional: OpenAI Realtime speech-to-speech, server-side TTS/STT, or as the language model.
+- `OPENAI_API_KEY` — live speech-to-speech voice (**OpenAI Realtime**), server TTS/STT, and a text model for analysis/drafting.
+- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`; a Gemini Developer API key from aistudio.google.com) — live speech-to-speech voice (**Google Gemini Live**) and a text model for analysis, drafting and coach memory. A Google key alone gives a fully working product.
+- `ANTHROPIC_API_KEY` (Claude) — text model for pipeline conversations, analysis and drafting. Voice then uses the browser's speech recognition/synthesis (Chrome/Edge).
 
-Keys can be set on the server (`apps/api/.env`) or per workspace in **Settings → AI providers** (encrypted at rest). To cap spend: set workspace quotas (Settings → Usage & quotas: session minutes / estimated cost per month with hard limits), keep `DEFAULT_MAX_SESSION_MINUTES` low, and use a cheaper model via `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5` / `ANTHROPIC_ANALYSIS_MODEL=claude-sonnet-5`. Every provider call is recorded in the usage ledger with an estimated cost.
+**Voice modes.** New scenarios default to **live speech-to-speech** (Model → Voice mode "Live", provider "Auto" = the first configured of OpenAI Realtime, then Google Gemini Live). The browser talks to the live model directly with a short-lived, single-use credential minted by the API — the real key never reaches the browser and the instructions/tools are locked into that credential. When no live-model key is configured (or on phone/meeting channels) sessions automatically fall back to the **pipeline** (speech-to-text → language model → text-to-speech) and the call screen says so. Pipeline mode stays selectable per scenario when you want server-side control and auditability of every reply. Text models (Anthropic → OpenAI → Google fallback order, or the scenario's choice) are still used for post-session scoring/extraction, the drafting assistant and coach memory. Models: `OPENAI_REALTIME_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_TEXT_MODEL`, `GEMINI_ANALYSIS_MODEL`, `ANTHROPIC_LIVE_MODEL`, … (see `.env.example`).
+
+Keys can be set on the server (`apps/api/.env`) or per workspace in **Settings → AI providers** (encrypted at rest). To cap spend: set workspace quotas (Settings → Usage & quotas: session minutes / estimated cost per month with hard limits), keep `DEFAULT_MAX_SESSION_MINUTES` low, and use a cheaper model via `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5` / `ANTHROPIC_ANALYSIS_MODEL=claude-sonnet-5` / `GEMINI_ANALYSIS_MODEL=gemini-2.5-flash`. Every provider call is recorded in the usage ledger with an estimated cost.
 
 ## Repository layout
 

@@ -1,10 +1,10 @@
 # ConversaForge — Status & handoff
 
-_Last updated: 2026-09-26 (end of the initial build)._
+_Last updated: 2026-09-27 (workstream I: live speech-to-speech models by default, Google Gemini Live + Gemini text)._
 
 This document separates what is **complete and verified**, what is **implemented but needs credentials/vendor access to verify**, and what is a **placeholder or not built**. Each row links to the detailed workstream notes in [`docs/workstreams/`](workstreams/).
 
-> **The one-line summary.** Every product surface works end to end in this environment with the clearly labeled **local simulator** standing in for the AI model. The real AI paths (Anthropic Claude, OpenAI) are implemented against current APIs but were **not** run with real keys — none were available. Per the brief, the core voice call must not be called "complete" until one real-provider run is done: see [First real run](#first-real-run-checklist) below. It needs one credential: `ANTHROPIC_API_KEY`.
+> **The one-line summary.** Every product surface works end to end in this environment with the clearly labeled **local simulator** standing in for the AI model. The real AI paths (Anthropic Claude, OpenAI, Google Gemini) are implemented against current SDKs but were **not** run with real keys — none were available. Live conversations now default to a **speech-to-speech live model** (OpenAI Realtime or Google Gemini Live) with automatic fallback to the STT → LLM → TTS pipeline. Per the brief, the core voice call must not be called "complete" until one real-provider run is done: see [First real run](#first-real-run-checklist) below. It needs one credential: `OPENAI_API_KEY` or `GEMINI_API_KEY` (live voice + text) — or `ANTHROPIC_API_KEY` for the pipeline.
 
 ## Legend
 - ✅ **Complete**: built, and exercised end to end here (API tests + browser journeys).
@@ -15,11 +15,11 @@ This document separates what is **complete and verified**, what is **implemented
 
 | Gate | Result |
 |---|---|
-| Shared package tests (`pnpm --filter @cf/shared test`) | ✅ 67/67 |
-| API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 355/355 (26 suites) |
+| Shared package tests (`pnpm --filter @cf/shared test`) | ✅ 71/71 |
+| API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 373/373 (28 suites) |
 | Type checks (`pnpm -r typecheck`) | ✅ clean |
 | Web production build (`pnpm --filter @cf/web build`) | ✅ 47 routes |
-| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 14/14 journey tests passed against a **production build** (`next build` + `next start`, CSP on) with a freshly migrated + seeded DB: 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md) |
+| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 14/14 journey tests passed against a **production build** (`next build` + `next start`, CSP on) with a freshly migrated + seeded DB: 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md). Workstream I re-ran `journeys.spec.ts` 14/14 (dev server, fresh DB) plus the new `gemini-live.spec.ts` (fake Gemini Live server driving the real SDK) and the voice/realtime specs |
 | Security review | ✅ 2 high / 5 medium / 6 low findings fixed. See [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) |
 | Dependency audit (`pnpm audit --prod`) | ✅ no known vulnerabilities |
 | Migrations from empty DB (`prisma migrate deploy`) + no drift vs schema | ✅ |
@@ -43,7 +43,7 @@ This document separates what is **complete and verified**, what is **implemented
 | Library, search/filters, templates (8 original), gallery (public + workspace) | ✅ | |
 | Editor: guided + advanced + YAML/JSON, autosave with revision conflicts, field locks, validation panel | ✅ | YAML is parsed as data only (no tags, alias/size limits) |
 | Publish (blocks on required-field / weight / placeholder errors), version history, diff, rollback-as-new-version, duplicate, export/import | ✅ | |
-| Drafting assistant with per-field diff, accept/reject, locked fields respected | ✅ simulator · 🔑 real model | The real path needs `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` |
+| Drafting assistant with per-field diff, accept/reject, locked fields respected | ✅ simulator · 🔑 real model | The real path needs `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` |
 | Preview incl. compiled system prompt | ✅ | |
 
 ### Live browser session ([B](workstreams/B-runtime.md), [C](workstreams/C-live-ui.md))
@@ -52,8 +52,10 @@ This document separates what is **complete and verified**, what is **implemented
 | Session state machine, explicit terminal/error states, resume with valid token only, dedupe by clientTurnId, usage charged once | ✅ | |
 | Intro → consent → device check → call → end screen; captions, timer, mute/pause/end, push-to-talk, "I'm done", typed fallback, reconnect banner, tool panel | ✅ | Typed input path verified in Chromium; 360 px layout checked |
 | Conversation engine: scenario intent vs live context vs state; agenda/topic tracking; follow-ups from the participant's answer; boundaries; closing exchange; timed instructions that don't cut off answers; silence check-ins that respect thinking pauses | ✅ with simulator · 🔑 with real LLM | The prompt is compiled from the version snapshot (see preview) |
-| **Browser voice (Web Speech STT + speechSynthesis TTS) + Claude** | 🔑 `ANTHROPIC_API_KEY` + Chrome/Edge | Headless Chromium has no speech engine, so end-of-turn/barge-in logic was tested with a scripted recognizer |
+| **Default voice mode: live speech-to-speech** (scenario `voiceMode: realtime`, provider `auto` = OpenAI, then Google) with automatic **pipeline fallback** when no live-model key is configured (and on phone/meeting channels); fallbacks recorded in `providerInfo` and shown on the call screen ("Live voice unavailable — using …") | ✅ selection/fallback logic (unit + integration + browser tests) · 🔑 live providers below | See [I](workstreams/I-live-models.md) |
 | OpenAI Realtime (WebRTC speech-to-speech) | 🔑 `OPENAI_API_KEY` | Ephemeral client secrets are minted server-side; handshake tested against a fake peer |
+| Google Gemini Live (WebSocket speech-to-speech from the browser) | 🔑 `GEMINI_API_KEY` | Single-use ephemeral tokens (30 min / 2 min to connect) with the whole Live setup locked server-side (instructions, tools, voice, transcription, VAD); transcripts/tools mirrored with the same dedupe and rate limits; barge-in, instructions, goAway/resumption. Tested with a mock Gemini API (server) and a fake Live server driving the real `@google/genai` browser SDK |
+| **Browser voice (Web Speech STT + speechSynthesis TTS) + LLM** (pipeline) | 🔑 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` + Chrome/Edge | Headless Chromium has no speech engine, so end-of-turn/barge-in logic was tested with a scripted recognizer |
 | Server STT/TTS pipeline (OpenAI / Deepgram / ElevenLabs) | 🔑 respective keys | Returns 503 naming the missing key |
 | Tools: end session, cards, notepad, multiple choice, document upload, knowledge search, timer, whiteboard; custom functions; audit events | ✅ | Planned tools (forms, slides, image generation, browser demo, screenshots, reactions) are registered as "coming soon" and rejected at runtime 🧩 |
 | Recording (consent-gated, chunked, idempotent upload), signed playback | ✅ | Browser speechSynthesis audio can't be captured: in browser-voice mode the recording contains the participant only (disclosed in UI) |
@@ -64,7 +66,7 @@ This document separates what is **complete and verified**, what is **implemented
 |---|---|---|
 | Upload (PDF/DOCX/TXT/MD/CSV, magic-byte checks, size limits), async processing, chunking with pages/headings | ✅ | No OCR for scanned PDFs 🧩 |
 | Full-text search with citations, workspace-isolated, results wrapped as untrusted data | ✅ | Semantic/vector search: interface only 🧩 |
-| Provider connections (encrypted BYO keys, verify, status per capability) | ✅ Anthropic verify observed (401 on fake key) · 🔑 others | |
+| Provider connections (encrypted BYO keys, verify, status per capability) incl. **Google Gemini** (LLM + live voice) | ✅ Anthropic verify observed (401 on fake key) · 🔑 others | Google verify = `models.list` with `x-goog-api-key` (mocked here: Google returns 403 through the proxy, handled as a network error) |
 | Custom functions (JSON-schema args, SSRF-guarded HTTPS calls, HMAC-signed) | ✅ | |
 
 ### Post-session pipeline & review ([D](workstreams/D-analysis.md))
@@ -98,9 +100,9 @@ This document separates what is **complete and verified**, what is **implemented
 | Meeting bots (Recall.ai) with manual URL scheduling | 🔑 `RECALL_API_KEY` + region + public HTTPS | Calendar auto-matching not built 🧩 |
 
 ## First real run checklist
-1. Put `ANTHROPIC_API_KEY=…` in `apps/api/.env` (or add it in Settings → AI providers), and optionally `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5` for lower latency/cost.
+1. Put `GEMINI_API_KEY=…` (Gemini Live + Gemini text) **or** `OPENAI_API_KEY=…` (OpenAI Realtime + text) in `apps/api/.env` (or add it in Settings → AI providers). New scenarios use live speech-to-speech automatically; existing seeded scenarios that say "Pipeline" can be switched in the editor (Model → Voice mode). For the pipeline with Claude, set `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5`).
 2. Set a spend guard: Settings → Usage & quotas → `cost_micros` monthly hard limit (e.g. 5,000,000 = $5).
-3. Open a published scenario in **Chrome or Edge** → Try it → allow the microphone → talk.
+3. Open a published scenario in **Chrome or Edge** → Try it → allow the microphone → talk. The call header shows "Voice: Google Gemini Live" / "OpenAI Realtime" (or the fallback in use).
 4. Afterward, check Sessions → the session → Report (scores should no longer say "Simulated").
 5. Record the result in this file and flip the 🔑 rows you verified to ✅.
 
@@ -121,4 +123,5 @@ See [`DEPLOYMENT.md`](DEPLOYMENT.md): Docker images (`infra/docker/*.Dockerfile`
 6. External penetration test before handling real hiring decisions; keep "Require human review" on for interviews.
 7. Recording finalization concatenates parts in memory (capped at 400 MB per recording); switch to S3 multipart streaming for long video sessions.
 8. Minor UX: stale "Uploaded" badge on the knowledge page until refresh; a nonce-based CSP (removing `'unsafe-inline'` for scripts) via Next middleware.
-9. Realtime (speech-to-speech) mode relays transcripts through the participant's browser, so its transcripts are not tamper-proof; use the pipeline mode for high-stakes assessments (see `SECURITY_REVIEW.md`).
+9. Realtime (speech-to-speech) mode — OpenAI Realtime and Gemini Live alike — relays transcripts through the participant's browser, so its transcripts are not tamper-proof; use the pipeline mode for high-stakes assessments (see `SECURITY_REVIEW.md`).
+10. Gemini Live: verify with a real key that the locked token setup, transcription timing, goAway/resumption and voice names behave as implemented (see [I](workstreams/I-live-models.md)); Gemini price rows are estimates.

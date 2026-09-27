@@ -88,6 +88,7 @@ All adapters implement `VoiceClient { start, stop, setMuted, setPaused, speak(tu
   - `realtime.tool_result` is sent back as a `function_call_output` item plus `response.create`. `realtime.instruction` becomes a system message item. Events issued before the data channel opens are queued.
   - Barge-in: `input_audio_buffer.speech_started` while the model's audio is playing marks that item `interrupted`. `cancelSpeech` sends `response.cancel` + `output_audio_buffer.clear`.
   - Push-to-talk sets `turn_detection: null` and uses `input_audio_buffer.clear`/`commit`.
+- **`gemini-live.ts` (`GeminiLiveAdapter`, workstream I).** Google Gemini Live over the `@google/genai` browser SDK with a server-minted ephemeral token; see [`I-live-models.md`](I-live-models.md).
 - **`typed.ts` (`TypedAdapter`).** Text input only. Agent replies are spoken when a speaker is available; otherwise playback is reported as completed so the server doesn't wait.
 - **`index.ts`.** `planVoice(config, capabilities, {hasMic, unavailable, preferTyped})` picks the mode:
   1. realtime, if `voiceMode === 'realtime'` and WebRTC is available

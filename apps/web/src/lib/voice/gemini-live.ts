@@ -315,6 +315,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
       return;
     }
     this.session = session;
+    if (this.ready) this.flushInstructions(); // setupComplete may have been delivered before connect() resolved
     // The server acknowledges the (locked) setup; if that message is slow, don't block audio forever.
     setTimeout(() => gen === this.gen && this.markReady(), 4000);
   }
