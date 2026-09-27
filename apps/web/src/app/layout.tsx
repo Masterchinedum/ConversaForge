@@ -11,7 +11,9 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
+      {/* Extensions such as Grammarly inject attributes on <body> before hydration; this silences only
+          attribute mismatches on this one element, not in its children. */}
+      <body suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

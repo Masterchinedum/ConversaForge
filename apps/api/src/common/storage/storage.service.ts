@@ -57,6 +57,8 @@ class LocalDriver implements StorageDriver {
 
 class S3Driver implements StorageDriver {
   private readonly client: S3Client;
+  /** Cloudflare R2 rejects x-amz-server-side-encryption (it always encrypts at rest), so only send it elsewhere. */
+  private readonly sse = /\.r2\.cloudflarestorage\.com/i.test(env.S3_ENDPOINT ?? '') ? undefined : ('AES256' as const);
   constructor(private readonly bucket: string) {
     this.client = new S3Client({
       region: env.S3_REGION ?? 'auto',
@@ -70,7 +72,7 @@ class S3Driver implements StorageDriver {
   }
   async put(key: string, body: Buffer, contentType: string) {
     await this.client.send(
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: 'AES256' }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: this.sse }),
     );
   }
   async get(key: string) {

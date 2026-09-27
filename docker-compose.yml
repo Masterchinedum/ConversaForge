@@ -6,7 +6,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: conversaforge
-    ports: ["5432:5432"]
+    # Host ports are overridable (e.g. POSTGRES_PORT=5433 in .env) when another project already uses the default.
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -15,7 +16,7 @@ services:
   # Valkey is a BSD-licensed, Redis-protocol-compatible server.
   redis:
     image: valkey/valkey:8-alpine
-    ports: ["6379:6379"]
+    ports: ["${REDIS_PORT:-6379}:6379"]
     volumes: [redisdata:/data]
 volumes:
   pgdata:
