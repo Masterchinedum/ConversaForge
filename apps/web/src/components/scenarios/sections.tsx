@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, type ReactNode } from 'react';
+import { useId, useMemo, type ReactNode } from 'react';
 import useSWR from 'swr';
 import {
   EXTRACTION_TYPES,
@@ -105,8 +105,8 @@ export function PersonaSection({ advanced = true }: { advanced?: boolean }) {
             <LockButton path="persona.voice" />
           </div>
           <div className="grid gap-4 sm:grid-cols-3" id={fieldDomId('persona.voice')}>
-            <SelectField path="persona.voice.provider" label="Voice provider" options={['browser', 'openai', 'elevenlabs']} />
-            <TextField path="persona.voice.voiceId" label="Voice id" placeholder="provider default" />
+            <VoiceOrder />
+            <TextField path="persona.voice.voiceId" label="Voice id" placeholder="model default" hint="Live voice name, e.g. Kore or Puck (Gemini), marin or cedar (OpenAI)." />
             <NumberField path="persona.voice.speed" label="Speed" min={0.5} max={2} step={0.05} />
           </div>
           <div className="flex items-center justify-between">
@@ -316,6 +316,34 @@ export function EndingSection() {
 }
 
 // ───────────────────────────── Model / audio / recording / analysis ─────────────────────────────
+
+const LIVE_VOICE_NAMES: Record<string, string> = { google: 'Gemini Live', openai: 'OpenAI Realtime' };
+const BACKUP_SPEECH_NAMES: Record<string, string> = { browser: 'browser speech', openai: 'OpenAI text-to-speech', elevenlabs: 'ElevenLabs', none: 'text only' };
+
+/** Read-only: which voice speaks, in fallback order. It is configured in "Model & providers". */
+function VoiceOrder() {
+  const id = useId();
+  const [voiceMode] = useField<string>('model.voiceMode');
+  const [liveProvider] = useField<string>('model.realtimeProvider');
+  const [tts] = useField<string>('model.ttsProvider');
+  const backup = BACKUP_SPEECH_NAMES[tts ?? 'browser'] ?? tts ?? 'browser speech';
+  const first = liveProvider === 'openai' ? 'openai' : 'google';
+  const order =
+    (voiceMode ?? 'realtime') === 'realtime'
+      ? `${LIVE_VOICE_NAMES[first]} → ${LIVE_VOICE_NAMES[first === 'google' ? 'openai' : 'google']} → ${backup} (backup)`
+      : backup;
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        Voice provider
+      </label>
+      <Input id={id} value={order} readOnly title={order} className="bg-slate-50 text-slate-700" data-testid="voice-order" />
+      <p className="text-xs text-slate-500">
+        Set in <a href={`#${fieldDomId('model')}`} className="underline">Model &amp; providers</a>.
+      </p>
+    </div>
+  );
+}
 
 const LLM_PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic (Claude)',

@@ -47,7 +47,7 @@ export const FIELD_GUIDE: Record<EditableFieldPath, string> = {
   'persona.role': 'string ≤1000. The role the AI plays (required).',
   'persona.name': 'string ≤80. The persona’s first name.',
   'persona.description': 'string ≤8000. Personality, background, hidden facts, how they react.',
-  'persona.voice': 'object {provider: string, voiceId: string, speed: number 0.5–2}.',
+  'persona.voice': 'object {provider: "auto" (the live model voice: Gemini Live, then OpenAI; leave as auto), voiceId: live voice name e.g. Kore/Puck (Gemini) or marin/cedar (OpenAI) or "" for the default, speed: number 0.5–2}.',
   'persona.avatar': 'object {kind: none|initials|image, imageUrl?: url, accentColor?: string}.',
   'instructions.aiInstructions': 'string ≤20000. Behavior instructions for the AI (prose). May use allowlisted {{placeholders}}.',
   'instructions.goals': 'array (1–30) of strings ≤500: what the conversation should achieve.',

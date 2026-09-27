@@ -27,7 +27,12 @@ export class ClientConfigService {
       stt: pi.stt ?? config.model.sttProvider,
       tts: pi.tts ?? config.model.ttsProvider,
       language: config.basics.language,
-      voice: { provider: pi.tts ?? config.persona.voice.provider, voiceId: config.persona.voice.voiceId, speed: config.persona.voice.speed },
+      voice: {
+        // The voice actually speaking: the live model's provider, else the pipeline's text-to-speech.
+        provider: pi.voiceMode === 'realtime' && pi.realtime ? pi.realtime.provider : pi.tts ?? config.persona.voice.provider,
+        voiceId: config.persona.voice.voiceId,
+        speed: config.persona.voice.speed,
+      },
       persona: {
         name: substituteVariables(config.persona.name, variables),
         role: substituteVariables(config.persona.role, variables),

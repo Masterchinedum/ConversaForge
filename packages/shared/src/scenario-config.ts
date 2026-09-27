@@ -145,7 +145,12 @@ export const ScenarioConfigSchema = z.object({
       description: prose(8000).default(''),
       voice: z
         .object({
-          provider: z.string().max(32).default('browser'),
+          /**
+           * 'auto' = the voice of the live model in use (Gemini Live, then OpenAI; see model.realtimeProvider).
+           * Which voice speaks is decided by `model` (live provider, then model.ttsProvider as the backup);
+           * older configs may still say 'browser' here, which has the same effect.
+           */
+          provider: z.string().max(32).default('auto'),
           voiceId: z.string().max(128).default(''),
           speed: z.number().min(0.5).max(2).default(1),
         })
