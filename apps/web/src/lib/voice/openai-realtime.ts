@@ -22,6 +22,7 @@ export function hasWebRtc(): boolean {
 
 export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements VoiceClient {
   readonly mode = 'realtime' as const;
+  readonly label = 'OpenAI Realtime';
   readonly listens = true;
   readonly speaks = true;
 
@@ -248,6 +249,13 @@ export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements Voice
       item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
     });
     if (respond && this.pendingCalls.size === 0) this.send({ type: 'response.create' });
+  }
+
+  /** Typed participant input in realtime mode: added as a user message, then a response is requested. */
+  sendUserText(text: string) {
+    if (this.agentAudible) this.cancelSpeech('local');
+    this.send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+    if (this.pendingCalls.size === 0) this.send({ type: 'response.create' });
   }
 
   private setAgentAudible(a: boolean) {

@@ -1,6 +1,7 @@
 /**
  * One interface for every way a participant can talk to the agent in the browser:
- * browser speech (Web Speech API), a server STT/TTS pipeline, OpenAI Realtime over WebRTC, or typing.
+ * browser speech (Web Speech API), a server STT/TTS pipeline, live speech-to-speech models (OpenAI Realtime
+ * over WebRTC, Google Gemini Live over WebSocket), or typing.
  */
 
 export type VoiceMode = 'browser' | 'server' | 'realtime' | 'typed';
@@ -8,7 +9,7 @@ export type VoiceMode = 'browser' | 'server' | 'realtime' | 'typed';
 export const VOICE_MODE_LABELS: Record<VoiceMode, string> = {
   browser: 'Browser speech',
   server: 'Server speech',
-  realtime: 'OpenAI Realtime',
+  realtime: 'Live voice',
   typed: 'Typed',
 };
 
@@ -71,6 +72,8 @@ export interface SpeakOptions {
 
 export interface VoiceClient {
   readonly mode: VoiceMode;
+  /** Human-readable provider label (e.g. "Google Gemini Live"); defaults to the mode label. */
+  readonly label?: string;
   /** Whether this adapter captures the participant's voice (typed does not). */
   readonly listens: boolean;
   /** Whether agent speech is audible through this adapter. */
@@ -95,6 +98,8 @@ export interface VoiceClient {
   sendToolResult?(callId: string, output: string): void;
   /** Realtime adapter: inject a server instruction (system message) and optionally request a response. */
   sendInstruction?(text: string, respond?: boolean): void;
+  /** Realtime adapter: a typed participant message the live model should hear and answer. */
+  sendUserText?(text: string): void;
   on<E extends keyof VoiceEvents>(event: E, fn: VoiceEvents[E]): () => void;
 }
 

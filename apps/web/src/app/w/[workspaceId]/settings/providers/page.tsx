@@ -67,7 +67,7 @@ interface Verification {
 
 const KIND_LABEL: Record<Kind, string> = {
   LLM: 'Language model',
-  REALTIME: 'Realtime voice',
+  REALTIME: 'Live voice (speech-to-speech)',
   TTS: 'Text-to-speech',
   STT: 'Speech-to-text',
   TELEPHONY: 'Phone calls',
@@ -161,7 +161,7 @@ export default function ProvidersSettingsPage() {
             {status.capabilities.some((c) => c.simulated) && (
               <div className="mt-3">
                 <Alert tone="warning" title="Conversations and analysis are simulated">
-                  No language-model key is configured, so the local simulator produces clearly-labeled, rule-based responses. Add an Anthropic or OpenAI key for real conversations and scoring.
+                  No language-model key is configured, so the local simulator produces clearly-labeled, rule-based responses. Add an Anthropic, OpenAI or Google Gemini key for real conversations and scoring.
                 </Alert>
               </div>
             )}
@@ -288,12 +288,15 @@ function ConfigFields({ provider, config, setConfig, info }: { provider: string;
           </div>
         </fieldset>
       )}
-      {(provider === 'anthropic' || provider === 'openai') && (
+      {(provider === 'anthropic' || provider === 'openai' || provider === 'google') && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Live conversation model" hint={provider === 'anthropic' ? 'Default: claude-opus-5 (claude-sonnet-5, claude-haiku-4-5 also work)' : 'Default: gpt-4.1-mini'}>
+          <Field
+            label={provider === 'google' ? 'Text model for pipeline conversations' : 'Live conversation model'}
+            hint={provider === 'anthropic' ? 'Default: claude-opus-5 (claude-sonnet-5, claude-haiku-4-5 also work)' : provider === 'google' ? 'Default: gemini-2.5-flash' : 'Default: gpt-4.1-mini'}
+          >
             {(id) => <Input id={id} value={config.liveModel ?? ''} onChange={(e) => set('liveModel', e.target.value.trim())} placeholder="(server default)" />}
           </Field>
-          <Field label="Analysis model" hint={provider === 'anthropic' ? 'Default: claude-opus-5' : 'Default: gpt-4.1'}>
+          <Field label="Analysis model" hint={provider === 'anthropic' ? 'Default: claude-opus-5' : provider === 'google' ? 'Default: gemini-2.5-pro' : 'Default: gpt-4.1'}>
             {(id) => <Input id={id} value={config.analysisModel ?? ''} onChange={(e) => set('analysisModel', e.target.value.trim())} placeholder="(server default)" />}
           </Field>
         </div>
@@ -305,6 +308,16 @@ function ConfigFields({ provider, config, setConfig, info }: { provider: string;
           </Field>
           <Field label="Voice" hint="e.g. alloy, verse, coral">
             {(id) => <Input id={id} value={config.voice ?? ''} onChange={(e) => set('voice', e.target.value.trim())} placeholder="(scenario default)" />}
+          </Field>
+        </div>
+      )}
+      {provider === 'google' && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Gemini Live model" hint="Default: gemini-2.5-flash-native-audio-latest">
+            {(id) => <Input id={id} value={config.realtimeModel ?? ''} onChange={(e) => set('realtimeModel', e.target.value.trim())} placeholder="(server default)" />}
+          </Field>
+          <Field label="Voice" hint="Gemini prebuilt voice, e.g. Kore, Puck, Zephyr, Charon">
+            {(id) => <Input id={id} value={config.voice ?? ''} onChange={(e) => set('voice', e.target.value.trim())} placeholder="(scenario / model default)" />}
           </Field>
         </div>
       )}

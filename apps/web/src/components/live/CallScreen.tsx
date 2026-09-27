@@ -205,7 +205,16 @@ export function CallScreen({
           )}
           {call.voiceMode && (
             <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-700" data-testid="voice-mode">
-              Voice: {modeLabel(call.voiceMode)}
+              Voice: {call.voiceLabel ?? modeLabel(call.voiceMode, config)}
+            </span>
+          )}
+          {call.liveFallback && (
+            <span
+              className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900"
+              data-testid="live-fallback"
+              title="Live speech-to-speech voice could not be used for this call; the fallback is shown next to it."
+            >
+              Live voice unavailable — using {(call.voiceLabel ?? modeLabel(call.voiceMode ?? 'typed', config)).toLowerCase()}
             </span>
           )}
         </span>

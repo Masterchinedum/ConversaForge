@@ -4,12 +4,13 @@
 
 import type { ClientRuntimeConfig } from '@cf/shared';
 import { BrowserSpeechAdapter, getSpeechRecognitionCtor } from './browser-speech';
+import { GeminiLiveAdapter } from './gemini-live';
 import { hasWebRtc, OpenAIRealtimeAdapter } from './openai-realtime';
 import { ServerPipelineAdapter } from './server-pipeline';
 import { BrowserSpeaker, ServerSpeaker, type AgentSpeaker } from './speaker';
 import { hasSpeechSynthesis } from './synth';
 import { TypedAdapter } from './typed';
-import type { VoiceClient, VoiceClientOptions, VoiceMode } from './types';
+import { VOICE_MODE_LABELS, type VoiceClient, type VoiceClientOptions, type VoiceMode } from './types';
 
 export * from './types';
 
@@ -21,6 +22,8 @@ export interface BrowserCapabilities {
   mediaRecorder: boolean;
   webrtc: boolean;
   audioContext: boolean;
+  /** WebSocket (Gemini Live); treated as available when omitted. */
+  websocket?: boolean;
 }
 
 export function detectCapabilities(): BrowserCapabilities {
@@ -42,6 +45,7 @@ export function detectCapabilities(): BrowserCapabilities {
     speechSynthesis: hasSpeechSynthesis(),
     mediaRecorder: typeof MediaRecorder !== 'undefined',
     webrtc: hasWebRtc(),
+    websocket: typeof WebSocket !== 'undefined',
     audioContext: typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined',
   };
 }
@@ -76,8 +80,16 @@ export function planVoice(
   if (!opts.hasMic) reasons.push('No microphone is available, so you can type your answers.');
 
   if (opts.hasMic && config.voiceMode === 'realtime') {
-    if (caps.webrtc && !un.has('realtime')) return { mode: 'realtime', output: 'realtime' };
-    reasons.push(un.has('realtime') ? 'Realtime voice is unavailable right now.' : 'This browser does not support WebRTC.');
+    const google = config.realtime?.provider === 'google';
+    const supported = google ? caps.audioContext && caps.websocket !== false : caps.webrtc;
+    if (supported && !un.has('realtime')) return { mode: 'realtime', output: 'realtime' };
+    reasons.push(
+      un.has('realtime')
+        ? 'Live voice is unavailable right now.'
+        : google
+          ? 'This browser cannot play live audio (WebAudio/WebSocket missing).'
+          : 'This browser does not support WebRTC.',
+    );
   }
   if (opts.hasMic && (config.stt === 'openai' || config.stt === 'deepgram')) {
     if (caps.audioContext && !un.has('server_stt')) return { mode: 'server', output: output(), reason: reasons[0] };
@@ -110,7 +122,7 @@ export function createVoiceClient(
 ): VoiceClient {
   switch (plan.mode) {
     case 'realtime':
-      return new OpenAIRealtimeAdapter(o, extra);
+      return config.realtime?.provider === 'google' ? new GeminiLiveAdapter(o) : new OpenAIRealtimeAdapter(o, extra);
     case 'server':
       return new ServerPipelineAdapter(o, createSpeaker(plan, config, o));
     case 'browser':
@@ -127,4 +139,10 @@ export function unavailableKeyFor(mode: VoiceMode, code: string): string[] {
   if (mode === 'server') return code === 'provider_unavailable' ? ['server_stt', 'server_tts'] : ['server_stt'];
   if (mode === 'browser') return ['browser_stt'];
   return [];
+}
+
+/** "Voice:" label for a mode; live voice names the provider actually used. */
+export function voiceLabel(mode: VoiceMode, config?: Pick<ClientRuntimeConfig, 'realtime'> | null): string {
+  if (mode === 'realtime') return config?.realtime?.provider === 'google' ? 'Google Gemini Live' : 'OpenAI Realtime';
+  return VOICE_MODE_LABELS[mode];
 }

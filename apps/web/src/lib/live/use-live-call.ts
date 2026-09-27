@@ -12,6 +12,7 @@ import {
   detectCapabilities,
   planVoice,
   unavailableKeyFor,
+  voiceLabel as labelFor,
   type VoiceClient,
   type VoiceMode,
   type VoicePlan,
@@ -49,6 +50,11 @@ export function useLiveCall(o: UseLiveCallOptions) {
   const [state, dispatch] = useReducer(liveReducer, initialLiveState);
   const [voiceMode, setVoiceMode] = useState<VoiceMode | null>(null);
   const [voicePlan, setVoicePlan] = useState<VoicePlan | null>(null);
+  /** "Voice:" label of the running adapter (names the live provider). */
+  const [voiceLabel, setVoiceLabel] = useState<string | null>(null);
+  /** Live speech-to-speech was wanted but is not in use (server fallback or runtime failure). */
+  const [liveFallback, setLiveFallback] = useState(false);
+  const choseTyping = useRef(false);
   const [muted, setMutedState] = useState(false);
   const [ptt, setPttState] = useState(o.config.turnTaking.mode === 'push_to_talk');
   const [talking, setTalkingState] = useState(false);
@@ -114,6 +120,9 @@ export function useLiveCall(o: UseLiveCallOptions) {
       voiceRef.current = vc;
       setVoicePlan(plan);
       setVoiceMode(vc.mode);
+      setVoiceLabel(vc.label ?? labelFor(vc.mode, config));
+      const wantedLive = (config.requestedVoiceMode ?? config.voiceMode) === 'realtime';
+      setLiveFallback(wantedLive && vc.mode !== 'realtime' && !devices.preferTyped && !choseTyping.current);
       if (plan.reason && !replan && vc.mode !== 'realtime') dispatch({ type: 'notice', level: 'info', message: plan.reason });
       const u = voiceUnsubs.current;
       u.push(
@@ -164,7 +173,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
             if (tornDown.current || voiceRef.current !== vc) return;
             void buildVoice(false, true).then(() => {
               const now = voiceRef.current;
-              if (now) dispatch({ type: 'notice', level: 'warning', message: `${err.message} Now using: ${modeLabel(now.mode)}.` });
+              if (now) dispatch({ type: 'notice', level: 'warning', message: `${err.message} Now using: ${now.label ?? labelFor(now.mode, configRef.current)}.` });
             });
           }, 0);
         }),
@@ -362,7 +371,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
     ];
     conn.connect();
     // Test hook (dev/e2e only): simulate network drops and inspect the connection.
-    if (process.env.NODE_ENV !== 'production') (window as any).__cfLive = { drop: () => conn.simulateDrop(), conn };
+    if (process.env.NODE_ENV !== 'production') (window as any).__cfLive = { drop: () => conn.simulateDrop(), conn, voice: () => voiceRef.current };
     const onUnload = () => {
       recorderRef.current?.stopOnUnload();
     };
@@ -417,6 +426,8 @@ export function useLiveCall(o: UseLiveCallOptions) {
       if (configRef.current.turnTaking.allowBargeIn) voiceRef.current?.cancelSpeech('local');
       dispatch({ type: 'local.final', clientTurnId, text: clean });
       send({ type: 'participant.final', clientTurnId, text: clean, startedAtMs: at, endedAtMs: at, source: 'typed' });
+      // A live speech-to-speech model does not see our transcript: hand it the typed text directly.
+      if (voiceRef.current?.mode === 'realtime') voiceRef.current.sendUserText?.(clean);
     },
     [send],
   );
@@ -435,6 +446,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
   }, []);
 
   const switchToTyping = useCallback(() => {
+    choseTyping.current = true;
     unavailable.current.add('browser_stt');
     unavailable.current.add('server_stt');
     unavailable.current.add('realtime');
@@ -472,6 +484,8 @@ export function useLiveCall(o: UseLiveCallOptions) {
     state,
     dispatch,
     voiceMode,
+    voiceLabel,
+    liveFallback,
     voicePlan,
     muted,
     ptt,
@@ -489,6 +503,6 @@ export function useLiveCall(o: UseLiveCallOptions) {
   };
 }
 
-export function modeLabel(m: VoiceMode): string {
-  return { browser: 'Browser speech', server: 'Server speech', realtime: 'OpenAI Realtime', typed: 'Typed' }[m];
+export function modeLabel(m: VoiceMode, config?: Pick<ClientRuntimeConfig, 'realtime'> | null): string {
+  return labelFor(m, config);
 }

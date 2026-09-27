@@ -7,6 +7,7 @@ import {
   LLM_PROVIDERS,
   normalizeWeights,
   PRIVACY,
+  REALTIME_PROVIDERS,
   SCENARIO_TYPE_LABELS,
   SCENARIO_TYPES,
   STT_PROVIDERS,
@@ -316,17 +317,61 @@ export function EndingSection() {
 
 // ───────────────────────────── Model / audio / recording / analysis ─────────────────────────────
 
+const LLM_PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic (Claude)',
+  openai: 'OpenAI',
+  google: 'Google Gemini',
+  simulator: 'Local simulator (no key)',
+};
+const LIVE_PROVIDER_LABELS: Record<string, string> = {
+  auto: 'Auto (first configured: OpenAI, then Google)',
+  openai: 'OpenAI Realtime',
+  google: 'Google Gemini Live',
+};
+
 export function ModelSection() {
+  const [voiceMode] = useField<string>('model.voiceMode');
+  const [liveProvider] = useField<string>('model.realtimeProvider');
+  const live = voiceMode === 'realtime';
   return (
     <Group title="Model & providers" path="model" description="Real providers are used when configured in Settings → AI providers; otherwise the clearly-labeled local simulator runs.">
       <div className={grid}>
-        <SelectField path="model.voiceMode" label="Voice mode" options={VOICE_MODES.map((v) => ({ value: v, label: v === 'pipeline' ? 'Pipeline (STT → LLM → TTS)' : 'Realtime (speech-to-speech)' }))} />
-        <SelectField path="model.llmProvider" label="LLM provider" options={LLM_PROVIDERS} />
+        <SelectField
+          path="model.voiceMode"
+          label="Voice mode"
+          options={VOICE_MODES.map((v) => ({ value: v, label: v === 'pipeline' ? 'Pipeline (speech-to-text → LLM → text-to-speech)' : 'Live speech-to-speech (recommended)' }))}
+          hint={
+            live
+              ? 'Most natural: low latency, the model hears tone and handles interruptions. Transcripts and tool calls are relayed to the platform by the participant’s browser. Falls back to the pipeline automatically when no live-model key is configured, and for phone/meeting channels.'
+              : 'Most control and auditability: every reply is generated server-side from the transcript by the LLM below, with browser or server speech. Higher latency, less natural turn-taking.'
+          }
+        />
+        {live && (
+          <SelectField
+            path="model.realtimeProvider"
+            label="Live provider"
+            options={REALTIME_PROVIDERS.map((p) => ({ value: p, label: LIVE_PROVIDER_LABELS[p] ?? p }))}
+            hint="If the chosen provider has no key, the other live provider is used, then the pipeline."
+          />
+        )}
+        {live && (
+          <TextField
+            path="model.realtimeModel"
+            label="Live model"
+            placeholder={liveProvider === 'google' ? 'server default (GEMINI_LIVE_MODEL)' : liveProvider === 'openai' ? 'server default (gpt-realtime)' : 'server default for the chosen provider'}
+            hint="Optional override, e.g. gpt-realtime or gemini-2.5-flash-native-audio-latest. Only applied when it matches the provider in use."
+          />
+        )}
+        <SelectField
+          path="model.llmProvider"
+          label={live ? 'LLM provider (pipeline fallback & analysis)' : 'LLM provider'}
+          options={LLM_PROVIDERS.map((p) => ({ value: p, label: LLM_PROVIDER_LABELS[p] ?? p }))}
+          hint={live ? 'Used when live voice falls back to the pipeline, and for post-session scoring/extraction.' : undefined}
+        />
         <TextField path="model.llmModel" label="LLM model" placeholder="workspace default" />
         <NumberField path="model.temperature" label="Temperature" min={0} max={1.5} step={0.1} hint="Ignored by models that do not support it." />
-        <SelectField path="model.sttProvider" label="Speech-to-text" options={STT_PROVIDERS} />
-        <SelectField path="model.ttsProvider" label="Text-to-speech" options={TTS_PROVIDERS} />
-        <TextField path="model.realtimeModel" label="Realtime model" placeholder="default" />
+        <SelectField path="model.sttProvider" label={live ? 'Speech-to-text (pipeline fallback)' : 'Speech-to-text'} options={STT_PROVIDERS} />
+        <SelectField path="model.ttsProvider" label={live ? 'Text-to-speech (pipeline fallback)' : 'Text-to-speech'} options={TTS_PROVIDERS} />
       </div>
     </Group>
   );

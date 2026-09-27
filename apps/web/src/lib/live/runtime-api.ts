@@ -161,6 +161,48 @@ export async function fetchRealtimeToken(sessionId: string, token: string): Prom
   };
 }
 
+/** Google Gemini Live credentials (see API RealtimeService.mintGoogle). Never contains the real API key. */
+export interface GeminiLiveCredentials {
+  provider: 'google';
+  model: string;
+  /** Ephemeral auth token (`auth_tokens/…`), used as the SDK apiKey with apiVersion v1alpha. */
+  token: string;
+  apiVersion: string;
+  expiresAt?: number;
+  newSessionExpiresAt?: number;
+  voice?: string | null;
+  connectConfig: Record<string, unknown>;
+  resumed: boolean;
+}
+
+/**
+ * Mint a Gemini Live token. `resumeHandle` resumes the previous Live session (goAway / dropped socket);
+ * `reconnect` asks for a fresh session that carries the transcript so far.
+ */
+export async function fetchGeminiToken(
+  sessionId: string,
+  token: string,
+  opts: { resumeHandle?: string; reconnect?: boolean } = {},
+): Promise<GeminiLiveCredentials> {
+  const body: Record<string, unknown> = {};
+  if (opts.resumeHandle) body.resumeHandle = opts.resumeHandle;
+  if (opts.reconnect) body.reconnect = true;
+  const r: any = await api(`${base(sessionId)}/realtime-token`, { method: 'POST', token, body });
+  const eph = pick<string>(r?.token, r?.name);
+  if (r?.provider !== 'google' || !eph) throw new ApiError(502, 'realtime_unavailable', 'No Gemini Live credentials returned');
+  return {
+    provider: 'google',
+    model: pick<string>(r?.model) ?? 'gemini-2.5-flash-native-audio-latest',
+    token: eph,
+    apiVersion: pick<string>(r?.apiVersion) ?? 'v1alpha',
+    expiresAt: r?.expiresAt,
+    newSessionExpiresAt: r?.newSessionExpiresAt,
+    voice: r?.voice ?? null,
+    connectConfig: r?.connectConfig && typeof r.connectConfig === 'object' ? r.connectConfig : {},
+    resumed: !!r?.resumed,
+  };
+}
+
 export async function createRecording(
   sessionId: string,
   token: string,

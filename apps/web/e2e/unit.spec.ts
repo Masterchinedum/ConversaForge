@@ -14,6 +14,8 @@ import { isPlausibleSessionToken, safeReturnUrl } from '../src/lib/live/token';
 import { EndOfTurnDetector, isLikelyIncomplete } from '../src/lib/voice/end-of-turn';
 import { isLikelyEcho, SentenceChunker } from '../src/lib/voice/synth';
 import { VadState } from '../src/lib/voice/vad';
+import { planVoice, voiceLabel } from '../src/lib/voice';
+import { floatToPcm16Base64, heardText } from '../src/lib/voice/gemini-live';
 
 /** Deterministic clock + timers for the detector. */
 function fakeClock() {
@@ -265,4 +267,22 @@ test('diagram layout and brand colors', () => {
   expect(r! + g!).toBeLessThan(400);
   expect(formatClock(65_000)).toBe('1:05');
   expect(formatClock(3_725_000)).toBe('1:02:05');
+});
+
+test('live voice plan: provider-specific capability checks, labels, heard-text truncation', () => {
+  const caps = { secureContext: true, getUserMedia: true, speechRecognition: true, speechSynthesis: true, mediaRecorder: true, webrtc: false, audioContext: true, websocket: true };
+  const base: any = { voiceMode: 'realtime', stt: 'browser', tts: 'browser', turnTaking: {} };
+  // Gemini Live needs WebAudio + WebSocket (not WebRTC); OpenAI Realtime needs WebRTC.
+  expect(planVoice({ ...base, realtime: { provider: 'google', model: 'g' } }, caps, { hasMic: true }).mode).toBe('realtime');
+  const oa = planVoice({ ...base, realtime: { provider: 'openai', model: 'o' } }, caps, { hasMic: true });
+  expect(oa.mode).toBe('browser');
+  expect(oa.reason).toMatch(/WebRTC/);
+  const failed = planVoice({ ...base, realtime: { provider: 'google', model: 'g' } }, caps, { hasMic: true, unavailable: new Set(['realtime']) });
+  expect(failed).toMatchObject({ mode: 'browser', reason: 'Live voice is unavailable right now.' });
+  expect(voiceLabel('realtime', { realtime: { provider: 'google', model: 'g' } })).toBe('Google Gemini Live');
+  expect(voiceLabel('realtime', { realtime: { provider: 'openai', model: 'o' } })).toBe('OpenAI Realtime');
+  expect(voiceLabel('browser', null)).toBe('Browser speech');
+  expect(heardText('Hi, I am the agent today.', 12)).toBe('Hi, I am');
+  expect(heardText('Short.', 100)).toBe('Short.');
+  expect(Buffer.from(floatToPcm16Base64(new Float32Array([0, 1, -1, 0.5])), 'base64')).toEqual(Buffer.from([0, 0, 0xff, 0x7f, 0x00, 0x80, 0xff, 0x3f]));
 });

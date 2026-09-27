@@ -14,7 +14,7 @@ import {
 } from '@/lib/live/devices';
 import type { LiveBootstrap } from '@/lib/live/runtime-api';
 import type { CallDevices } from '@/lib/live/use-live-call';
-import { detectCapabilities, planVoice, VOICE_MODE_LABELS, type BrowserCapabilities } from '@/lib/voice';
+import { detectCapabilities, planVoice, voiceLabel, type BrowserCapabilities } from '@/lib/voice';
 import { hasSpeechSynthesis, pickVoice } from '@/lib/voice/synth';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { MicMeter, useStreamLevel } from './MicMeter';
@@ -347,8 +347,14 @@ export function DeviceCheck({
           {caps && plan && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
               <p className="font-medium text-slate-800">
-                Voice mode: <span data-testid="planned-voice-mode">{VOICE_MODE_LABELS[plan.mode]}</span>
+                Voice mode: <span data-testid="planned-voice-mode">{voiceLabel(plan.mode, config)}</span>
+                {plan.mode === 'realtime' && <span className="ml-1 font-normal text-slate-600">(live speech-to-speech)</span>}
               </p>
+              {plan.mode !== 'realtime' && (config.requestedVoiceMode ?? config.voiceMode) === 'realtime' && (
+                <p className="mt-1 text-amber-800" data-testid="planned-live-fallback">
+                  Live voice unavailable — using {voiceLabel(plan.mode, config).toLowerCase()} instead.
+                </p>
+              )}
               {plan.reason && <p className="mt-1 text-slate-600">{plan.reason}</p>}
               <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
                 <Cap ok={caps.speechRecognition} label="Speech recognition" />
