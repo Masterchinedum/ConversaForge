@@ -78,8 +78,9 @@ test('Gemini Live adapter: ephemeral-token connect, transcripts once, barge-in, 
     server.onMessage((m) => {
       const d = JSON.parse(String(m));
       if (d.type === 'welcome') d.config = { ...d.config, voiceMode: 'realtime', requestedVoiceMode: 'realtime', realtime: { provider: 'google', model: 'gemini-live-test' } };
-      // The real session runs the pipeline; keep its agent turns out of this protocol test.
-      if (['agent.start', 'agent.delta', 'agent.end'].includes(d.type)) return;
+      // Keep the real session's own agent turns, opening instruction and tool results out of this protocol
+      // test (the test injects the instructions and tool results it wants to observe).
+      if (['agent.start', 'agent.delta', 'agent.end', 'realtime.instruction', 'realtime.tool_result'].includes(d.type)) return;
       ws.send(JSON.stringify(d));
     });
   });
@@ -102,7 +103,7 @@ test('Gemini Live adapter: ephemeral-token connect, transcripts once, barge-in, 
   expect(setup.outputAudioTranscription).toEqual({});
   expect(setup.systemInstruction).toBeUndefined();
   expect(setup.tools).toBeUndefined();
-  expect(tokenRequests[0]).toEqual({});
+  expect(tokenRequests[0]).toEqual({ provider: 'google' });
 
   // ── Mic audio streams as PCM16 16 kHz (~100 ms chunks) ──
   await expect.poll(() => c1.received.filter((m) => m.realtimeInput?.audio).length, { timeout: 20_000 }).toBeGreaterThan(3);
@@ -188,7 +189,7 @@ test('Gemini Live adapter: ephemeral-token connect, transcripts once, barge-in, 
   gem({ sessionResumptionUpdate: { newHandle: 'resume-handle-1', resumable: true } });
   gem({ goAway: { timeLeft: '10s' } });
   await expect.poll(() => conns.length, { timeout: 20_000 }).toBe(2);
-  expect(tokenRequests[1]).toEqual({ resumeHandle: 'resume-handle-1' });
+  expect(tokenRequests[1]).toEqual({ provider: 'google', resumeHandle: 'resume-handle-1' });
   const c2 = conns[1]!;
   expect(c2.url).toContain('access_token=auth_tokens/test-eph-2');
   await expect.poll(() => c2.received[0]?.setup?.sessionResumption).toEqual({ handle: 'resume-handle-1' });

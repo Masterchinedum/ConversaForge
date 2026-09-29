@@ -78,6 +78,14 @@ export type LiveAction =
 
 let noticeSeq = 1;
 
+/**
+ * Live-model (realtime) transcript items are reported with the adapter's item id; the server saves them
+ * with `clientTurnId = rt_<itemId>`. Both spellings identify the same turn.
+ */
+export function turnMatchesItem(turn: Pick<TurnDTO, 'id' | 'clientTurnId'>, itemId: string): boolean {
+  return turn.id === itemId || turn.clientTurnId === itemId || turn.clientTurnId === `rt_${itemId}`;
+}
+
 export function upsertTurn(turns: TurnDTO[], turn: TurnDTO): TurnDTO[] {
   const idx = turns.findIndex((t) => t.id === turn.id || (turn.clientTurnId && t.clientTurnId === turn.clientTurnId));
   let next: TurnDTO[];
@@ -118,6 +126,8 @@ export function liveReducer(s: LiveState, a: LiveAction): LiveState {
     case 'dismissNotice':
       return { ...s, notices: s.notices.filter((n) => n.id !== a.id) };
     case 'local.partial':
+      // An empty partial clears the caption for that utterance (it was committed or discarded).
+      if (!a.text) return s.partial?.clientTurnId === a.clientTurnId ? { ...s, partial: null } : s;
       return { ...s, partial: { clientTurnId: a.clientTurnId, text: a.text } };
     case 'local.clearPartial':
       return { ...s, partial: null };
@@ -132,7 +142,7 @@ export function liveReducer(s: LiveState, a: LiveAction): LiveState {
       };
     }
     case 'local.realtimeDelta': {
-      if (s.turns.some((t) => t.clientTurnId === a.itemId || t.id === a.itemId)) return s;
+      if (s.turns.some((t) => turnMatchesItem(t, a.itemId))) return s;
       const speaker = a.role === 'user' ? 'PARTICIPANT' : 'AGENT';
       const existing = s.streaming.find((t) => t.id === a.itemId);
       const streaming = existing
@@ -162,7 +172,7 @@ function serverReducer(s: LiveState, m: ServerMessage): LiveState {
         state: m.session.state,
         turns,
         // Anything that was mid-stream before the reconnect is superseded by the saved transcript.
-        streaming: s.streaming.filter((st) => !turns.some((t) => t.id === st.id)),
+        streaming: s.streaming.filter((st) => !turns.some((t) => turnMatchesItem(t, st.id))),
         optimistic: s.optimistic.filter((o) => !turns.some((t) => t.clientTurnId === o.clientTurnId)),
         timer: {
           elapsedMs: m.session.elapsedMs,
@@ -205,9 +215,9 @@ function serverReducer(s: LiveState, m: ServerMessage): LiveState {
       return {
         ...s,
         turns,
-        streaming: s.streaming.filter((t) => t.id !== turn.id && t.id !== turn.clientTurnId),
+        streaming: s.streaming.filter((t) => !turnMatchesItem(turn, t.id)),
         optimistic: s.optimistic.filter((o) => o.clientTurnId !== turn.clientTurnId),
-        partial: s.partial && s.partial.clientTurnId === turn.clientTurnId ? null : s.partial,
+        partial: s.partial && turnMatchesItem(turn, s.partial.clientTurnId) ? null : s.partial,
       };
     }
     case 'tool.present':
@@ -259,6 +269,8 @@ export function transcriptRows(s: LiveState): TranscriptRow[] {
   for (const o of s.optimistic) rows.push({ key: `o:${o.clientTurnId}`, speaker: 'PARTICIPANT', text: o.text, status: 'sending' });
   for (const st of s.streaming) {
     if (!st.text) continue;
+    // A participant utterance still being transcribed is shown once, as the caption below the log.
+    if (st.speaker === 'PARTICIPANT' && s.partial?.text && s.partial.clientTurnId === st.id) continue;
     rows.push({ key: `s:${st.id}`, speaker: st.speaker, text: st.text, status: 'streaming', interrupted: st.interrupted });
   }
   if (s.partial?.text) rows.push({ key: `p:${s.partial.clientTurnId}`, speaker: 'PARTICIPANT', text: s.partial.text, status: 'partial' });

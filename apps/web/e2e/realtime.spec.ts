@@ -66,6 +66,8 @@ test('realtime adapter: WebRTC handshake + transcript/tool mirroring + tool resu
     server.onMessage((m) => {
       const d = JSON.parse(String(m));
       if (d.type === 'welcome') d.config = { ...d.config, voiceMode: 'realtime', realtime: { provider: 'openai', model: 'gpt-realtime' } };
+      // Keep the real session's own agent turns / opening instruction out of this protocol test.
+      if (['agent.start', 'agent.delta', 'agent.end', 'realtime.instruction'].includes(d.type)) return;
       ws.send(JSON.stringify(d));
     });
   });

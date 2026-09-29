@@ -86,6 +86,30 @@ export function sql(query: string): string {
   return execFileSync('psql', [DATABASE_URL, '-tAc', query], { encoding: 'utf8' }).trim();
 }
 
+/**
+ * E2E_FAKE_MIC=1: replace getUserMedia with a synthetic, silent microphone stream. For machines where
+ * Chrome's fake capture device never resolves getUserMedia (e.g. macOS without a system microphone
+ * permission for the launched browser); the audio path (worklet/script processor, VAD, PCM chunks) still runs.
+ */
+export async function installFakeMic(page: Page) {
+  await page.evaluate(() => {
+    const Ctor = (window as any).AudioContext ?? (window as any).webkitAudioContext;
+    const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (c: MediaStreamConstraints) => {
+      if (!c?.audio) return orig(c);
+      const ctx = new Ctor();
+      await ctx.resume().catch(() => undefined);
+      const dest = ctx.createMediaStreamDestination();
+      const src = ctx.createConstantSource();
+      src.offset.value = 0;
+      src.connect(dest);
+      src.start();
+      (window as any).__cfFakeMicCtx = ctx;
+      return dest.stream;
+    };
+  });
+}
+
 /** Intro → consent → device check → call screen, choosing typed input once the call is live. */
 export async function joinCall(page: Page, opts: { recordAudio?: boolean } = {}) {
   await page.getByRole('button', { name: 'Continue' }).click();
@@ -95,6 +119,7 @@ export async function joinCall(page: Page, opts: { recordAudio?: boolean } = {})
   if (opts.recordAudio === false) await rec.uncheck();
   else await rec.check();
   await page.getByRole('button', { name: 'Agree and continue' }).click();
+  if (process.env.E2E_FAKE_MIC) await installFakeMic(page);
   await page.getByRole('button', { name: /Allow microphone/ }).click();
   await page.getByRole('button', { name: 'Join the call' }).click();
   await page.getByTestId('call-status').filter({ hasText: 'Live' }).waitFor({ timeout: 30_000 });

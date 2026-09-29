@@ -5,6 +5,8 @@
  * - Speech starts once energy stays above `floor × ratio` (and an absolute minimum) for `startMs`.
  * - While agent audio is playing we raise the bar (echo leaks into the mic even with AEC) and require
  *   sustained energy for `bargeInMs` (~300 ms), so the agent's own voice does not trigger barge-in.
+ * - The first `agentWarmupMs` of agent audio only teach the echo floor (fast adaptation, no start-of-speech):
+ *   the echo of the first words would otherwise exceed a threshold learned from a quiet room.
  */
 
 export interface VadOptions {
@@ -18,6 +20,10 @@ export interface VadOptions {
   ratio?: number;
   /** Extra multiplier while the agent is speaking. */
   agentRatio?: number;
+  /** Multiplier over the learned echo floor while the agent is speaking. */
+  echoRatio?: number;
+  /** ms after agent audio starts during which the echo floor is learned and no speech start fires. */
+  agentWarmupMs?: number;
   /** Absolute RMS minimum (0..1) to count as speech. */
   minRms?: number;
   intervalMs?: number;
@@ -43,6 +49,8 @@ export class VadState {
   speaking = false;
   agentPlaying = false;
   private agentFloor = 0;
+  /** ms since agent audio started (echo floor warm-up). */
+  private agentMs = 0;
   readonly o: Required<Omit<VadOptions, 'intervalMs'>>;
 
   constructor(opts: VadOptions = {}) {
@@ -52,6 +60,8 @@ export class VadState {
       hangoverMs: opts.hangoverMs ?? 450,
       ratio: opts.ratio ?? 3,
       agentRatio: opts.agentRatio ?? 2.2,
+      echoRatio: opts.echoRatio ?? 4,
+      agentWarmupMs: opts.agentWarmupMs ?? 400,
       minRms: opts.minRms ?? 0.012,
     };
   }
@@ -60,20 +70,28 @@ export class VadState {
     const base = Math.max(this.o.minRms, this.floor * this.o.ratio);
     if (!this.agentPlaying) return base;
     // While the agent talks, the echo sets a higher floor.
-    return Math.max(base * this.o.agentRatio, this.agentFloor * this.o.ratio);
+    return Math.max(base * this.o.agentRatio, this.agentFloor * this.o.echoRatio);
   }
 
   /** Feed one RMS sample observed `dtMs` after the previous one. Returns an edge if one occurred. */
   step(rms: number, dtMs: number): 'start' | 'end' | null {
     const th = this.threshold();
+    if (this.agentPlaying) this.agentMs += dtMs;
+    const warming = this.agentPlaying && this.agentMs < this.o.agentWarmupMs;
     if (!this.speaking) {
-      if (this.agentPlaying) this.agentFloor = this.agentFloor * 0.97 + rms * 0.03;
-      else this.floor = Math.min(0.2, Math.max(0.0005, this.floor * 0.98 + rms * 0.02));
+      if (warming) this.agentFloor = Math.max(this.agentFloor * 0.7 + rms * 0.3, this.agentFloor);
+      else if (this.agentPlaying) {
+        // Learn the echo level from what is below the bar; energy above it may be the participant
+        // starting to talk, so it moves the bar only slowly until the confirmation window decides.
+        const k = rms > th ? 0.01 : 0.03;
+        this.agentFloor = this.agentFloor * (1 - k) + rms * k;
+      } else this.floor = Math.min(0.2, Math.max(0.0005, this.floor * 0.98 + rms * 0.02));
     }
     if (rms > th) {
       this.above += dtMs;
       this.below = 0;
       const need = this.agentPlaying ? this.o.bargeInMs : this.o.startMs;
+      if (warming && !this.speaking) this.above = 0; // still learning what the agent's echo sounds like
       if (!this.speaking && this.above >= need) {
         this.speaking = true;
         return 'start';
@@ -90,8 +108,16 @@ export class VadState {
   }
 
   setAgentPlaying(p: boolean) {
-    if (p && !this.agentPlaying) this.agentFloor = this.floor * 2;
+    if (p && !this.agentPlaying) {
+      this.agentFloor = this.floor * 2;
+      this.agentMs = 0;
+    }
     this.agentPlaying = p;
+  }
+
+  /** ms of energy above the threshold so far (0 unless a start-of-speech is building up). */
+  get aboveMs(): number {
+    return this.above;
   }
 }
 

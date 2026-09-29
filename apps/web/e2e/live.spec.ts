@@ -7,7 +7,7 @@
  *   E2E_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/conversaforge npx playwright test
  */
 import { expect, test, type Page } from '@playwright/test';
-import { agentTurns, createSession, DATABASE_URL, joinCall, savedTexts, sql } from './helpers';
+import { DATABASE_URL, agentTurns, createSession, installFakeMic, joinCall, savedTexts, sql } from './helpers';
 
 const consoleErrors: string[] = [];
 function trackConsole(page: Page) {
@@ -178,6 +178,7 @@ test('a second tab supersedes the first, which can take over', async ({ page, co
   await joinCall(page, { recordAudio: false });
   const second = await context.newPage();
   await second.goto(`/live/${sessionId}`);
+  if (process.env.E2E_FAKE_MIC) await installFakeMic(second);
   await second.getByRole('button', { name: /Allow microphone/ }).click();
   await second.getByRole('button', { name: 'Rejoin call' }).click();
   await expect(second.getByTestId('call-status')).toHaveText('Live', { timeout: 30_000 });

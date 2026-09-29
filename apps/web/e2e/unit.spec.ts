@@ -9,13 +9,15 @@ import { brandStyle, formatClock, parseColor } from '../src/components/live/bran
 import { layoutDiagram } from '../src/components/live/tools/diagram-layout';
 import { backoffDelay } from '../src/lib/live/connection';
 import { normalizeBootstrap } from '../src/lib/live/runtime-api';
-import { initialLiveState, liveReducer, transcriptRows, type LiveState } from '../src/lib/live/store';
+import { initialLiveState, liveReducer, transcriptRows, turnMatchesItem, type LiveState } from '../src/lib/live/store';
 import { isPlausibleSessionToken, safeReturnUrl } from '../src/lib/live/token';
 import { EndOfTurnDetector, isLikelyIncomplete } from '../src/lib/voice/end-of-turn';
 import { isLikelyEcho, SentenceChunker } from '../src/lib/voice/synth';
 import { VadState } from '../src/lib/voice/vad';
 import { planVoice, unavailableKeyFor, voiceLabel } from '../src/lib/voice';
-import { floatToPcm16Base64, heardText } from '../src/lib/voice/gemini-live';
+import { cleanTranscript, floatToPcm16Base64, heardText } from '../src/lib/voice/gemini-live';
+import { Resampler } from '../src/lib/voice/audio-player';
+import { MicGate } from '../src/lib/voice/mic-gate';
 
 /** Deterministic clock + timers for the detector. */
 function fakeClock() {
@@ -145,6 +147,125 @@ test('VAD: adaptive floor; barge-in needs sustained energy above a raised thresh
   const edges: Array<string | null> = [];
   for (let i = 0; i < 12; i++) edges.push(v.step(0.3, 30));
   expect(edges.indexOf('start')).toBeGreaterThanOrEqual(9);
+});
+
+test('VAD: aboveMs reports a start-of-speech building up and resets after silence', () => {
+  const v = new VadState({ startMs: 150, bargeInMs: 300, hangoverMs: 450 });
+  for (let i = 0; i < 50; i++) v.step(0.003, 30);
+  expect(v.aboveMs).toBe(0);
+  v.setAgentPlaying(true);
+  for (let i = 0; i < 14; i++) v.step(0.003, 30); // past the echo warm-up
+  v.step(0.3, 30);
+  v.step(0.3, 30);
+  expect(v.aboveMs).toBe(60);
+  for (let i = 0; i < 4; i++) v.step(0.002, 30);
+  expect(v.aboveMs).toBe(0);
+});
+
+test('VAD: the echo of the agent\'s first words is learned, not mistaken for a barge-in', () => {
+  const v = new VadState({ startMs: 150, bargeInMs: 300, hangoverMs: 450, agentWarmupMs: 400 });
+  for (let i = 0; i < 100; i++) v.step(0.003, 30); // quiet room: threshold ≈ 0.012
+  v.setAgentPlaying(true);
+  // Loud speaker echo (no echo cancellation) from the very first tick: never a start-of-speech.
+  const edges: Array<string | null> = [];
+  for (let i = 0; i < 60; i++) edges.push(v.step(0.06 + (i % 3) * 0.02, 30)); // 1.8 s of bursty echo
+  expect(edges.every((e) => e === null)).toBe(true);
+  expect(v.threshold()).toBeGreaterThan(0.2); // learned floor × echoRatio
+  // The participant talking clearly over it (louder than the echo, sustained) still barges in.
+  let start = -1;
+  for (let i = 0; i < 20 && start < 0; i++) if (v.step(0.5, 30) === 'start') start = i;
+  expect(start).toBeGreaterThanOrEqual(9);
+});
+
+test('transcript cleaning: placeholder tokens and punctuation-only fragments are not speech', () => {
+  expect(cleanTranscript('<no speech>{pause}')).toBe('');
+  expect(cleanTranscript('...')).toBe('');
+  expect(cleanTranscript('…')).toBe('');
+  expect(cleanTranscript(' <noise> Hi Casey, good to see you. ')).toBe('Hi Casey, good to see you.');
+  expect(cleanTranscript('It sounds like {pause} a lot of pressure')).toBe('It sounds like a lot of pressure');
+  expect(cleanTranscript('Numbers like 3 count')).toBe('Numbers like 3 count');
+  expect(cleanTranscript('...d...')).toBe('...d...');
+  // Tokens arriving in pieces stay hidden until complete.
+  expect(cleanTranscript('<no')).toBe('');
+  expect(cleanTranscript('Sure. <no')).toBe('Sure.');
+  expect(cleanTranscript('<no speech>{pau')).toBe('');
+});
+
+test('mic gate: withholds mic audio while the agent is audible, replays the pre-roll when the participant talks', () => {
+  const g = new MicGate(3);
+  expect(g.closed).toBe(false);
+  expect(g.offer('a')).toEqual(['a']);
+  g.agentAudible = true;
+  expect(g.closed).toBe(true);
+  for (const c of ['b', 'c', 'd', 'e']) expect(g.offer(c)).toEqual([]);
+  expect(g.buffered).toBe(3); // ring keeps the newest chunks only
+  g.userSpeaking = true;
+  expect(g.closed).toBe(false);
+  expect(g.release()).toEqual(['c', 'd', 'e']);
+  expect(g.buffered).toBe(0);
+  expect(g.offer('f')).toEqual(['f']);
+  // Participant stops while the agent is still talking → closed again; the agent finishing drops the echo tail.
+  g.userSpeaking = false;
+  expect(g.offer('g')).toEqual([]);
+  g.agentAudible = false;
+  expect(g.release(0)).toEqual([]);
+  expect(g.closed).toBe(false);
+  // Push-to-talk held always streams.
+  g.agentAudible = true;
+  g.forced = true;
+  expect(g.offer('h')).toEqual(['h']);
+});
+
+test('resampler: continuous across chunk boundaries, exact 2× upsampling, keeps sample count over time', () => {
+  // 24 kHz → 48 kHz: each input sample yields two output samples; chunk seams interpolate against the
+  // previous chunk's last sample instead of restarting from zero.
+  const r = new Resampler(24000, 48000);
+  const a = r.process(new Float32Array([0, 1, 0, -1]));
+  expect([...a]).toEqual([0, 0.5, 1, 0.5, 0, -0.5, -1]);
+  const b = r.process(new Float32Array([0, 1]));
+  expect([...b]).toEqual([-0.5, 0, 0.5, 1]); // starts halfway between -1 (previous chunk) and 0
+  // 24 kHz → 44.1 kHz over many chunks: output count tracks the ratio (no drift, no gaps).
+  const r2 = new Resampler(24000, 44100);
+  let total = 0;
+  for (let i = 0; i < 100; i++) total += r2.process(new Float32Array(2400).fill(0.1)).length;
+  expect(Math.abs(total - (240000 * 44100) / 24000)).toBeLessThan(3);
+  // Same rate: pass-through.
+  const same = new Float32Array([0.25, 0.5]);
+  expect(new Resampler(48000, 48000).process(same)).toBe(same);
+});
+
+test('store: live-model rows are not duplicated (server saves them as rt_<itemId>) and captions clear', () => {
+  let s = initialLiveState;
+  s = liveReducer(s, { type: 'local.partial', clientTurnId: 'g1_1_u', text: 'Hello from' });
+  s = liveReducer(s, { type: 'local.realtimeDelta', itemId: 'g1_1_u', role: 'user', text: 'Hello from' });
+  // While the participant is still being transcribed the utterance shows once, as the caption.
+  expect(transcriptRows(s).map((r) => [r.text, r.status])).toEqual([['Hello from', 'partial']]);
+  s = liveReducer(s, { type: 'local.partial', clientTurnId: 'g1_1_u', text: '' });
+  expect(transcriptRows(s).map((r) => [r.text, r.status])).toEqual([['Hello from', 'streaming']]);
+  s = liveReducer(s, { type: 'local.realtimeDelta', itemId: 'g1_2_a', role: 'assistant', text: 'Hi there.' });
+  expect(transcriptRows(s)).toHaveLength(2);
+  expect(turnMatchesItem({ id: 't1', clientTurnId: 'rt_g1_1_u' }, 'g1_1_u')).toBe(true);
+  expect(turnMatchesItem({ id: 't1', clientTurnId: 'rt_g1_1_u' }, 'g1_2_a')).toBe(false);
+  s = apply(s, { type: 'turn.saved', turn: turn({ id: 't1', seq: 1, speaker: 'PARTICIPANT', text: 'Hello from Gemini.', clientTurnId: 'rt_g1_1_u' }) });
+  s = apply(s, { type: 'turn.saved', turn: turn({ id: 't2', seq: 2, speaker: 'AGENT', text: 'Hi there.', clientTurnId: 'rt_g1_2_a' }) });
+  expect(transcriptRows(s).map((r) => [r.text, r.status])).toEqual([
+    ['Hello from Gemini.', 'saved'],
+    ['Hi there.', 'saved'],
+  ]);
+  // Late deltas for a saved item are ignored; a resumed welcome drops in-flight rows the server already has.
+  s = liveReducer(s, { type: 'local.realtimeDelta', itemId: 'g1_2_a', role: 'assistant', text: 'Hi there. More' });
+  expect(transcriptRows(s)).toHaveLength(2);
+  s = liveReducer(s, { type: 'local.realtimeDelta', itemId: 'g1_3_a', role: 'assistant', text: 'Next' });
+  s = apply(s, {
+    type: 'welcome',
+    protocol: 1,
+    session: { id: 's', state: 'ACTIVE', elapsedMs: 0, maxDurationSec: 600, muted: false } as any,
+    config: undefined as any,
+    transcript: [turn({ id: 't3', seq: 3, speaker: 'AGENT', text: 'Next question.', clientTurnId: 'rt_g1_3_a' })],
+    tools: [],
+    resumed: true,
+  } as any);
+  expect(transcriptRows(s).map((r) => r.text)).toEqual(['Hello from Gemini.', 'Hi there.', 'Next question.']);
 });
 
 test('echo filter and sentence chunker', () => {

@@ -87,7 +87,7 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(setup.outputAudioTranscription).toEqual({});
     expect(setup.realtimeInputConfig).toMatchObject({
       activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-      automaticActivityDetection: { endOfSpeechSensitivity: 'END_SENSITIVITY_LOW' },
+      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW', endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 },
     });
     expect(setup.sessionResumption).toEqual({});
     expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });

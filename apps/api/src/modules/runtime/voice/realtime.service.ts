@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
-import { ActivityHandling, EndSensitivity, Modality, type GoogleGenAI, type LiveConnectConfig } from '@google/genai';
+import { ActivityHandling, EndSensitivity, Modality, StartSensitivity, type GoogleGenAI, type LiveConnectConfig } from '@google/genai';
 import type { RealtimeProviderId, ScenarioConfig } from '@cf/shared';
 import { env } from '../../../config/env';
 import { Errors } from '../../../common/http/errors';
@@ -233,6 +233,10 @@ export function geminiLiveConfig(
     outputAudioTranscription: {},
     realtimeInputConfig: {
       automaticActivityDetection: {
+        // Start of speech is detected conservatively: residual echo of the agent's own voice, keyboard
+        // clicks and room noise must not count as the participant interrupting (the browser additionally
+        // withholds mic audio while the agent is audible unless its local VAD hears the participant).
+        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
         // End of speech is detected less eagerly and after a longer silence, so thinking pauses are not cut off.
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
         silenceDurationMs: Math.max(500, Math.min(3000, tt.endOfTurnSilenceMs)),

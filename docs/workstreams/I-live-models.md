@@ -63,7 +63,7 @@ ai.authTokens.create({ config: {
     tools: [{ functionDeclarations: [{ name, description, parametersJsonSchema }] }], // same set as OpenAI: catalog tools, fn_* custom functions, update_progress, end_session
     speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } /* + languageCode for non-native-audio models */ },
     inputAudioTranscription: {}, outputAudioTranscription: {},
-    realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: END_SENSITIVITY_LOW, silenceDurationMs: clamp(endOfTurnSilenceMs, 500..3000) },
+    realtimeInputConfig: { automaticActivityDetection: { startOfSpeechSensitivity: START_SENSITIVITY_LOW, endOfSpeechSensitivity: END_SENSITIVITY_LOW, silenceDurationMs: clamp(endOfTurnSilenceMs, 500..3000) },
                            activityHandling: allowBargeIn ? START_OF_ACTIVITY_INTERRUPTS : NO_INTERRUPTION },
     sessionResumption: { handle? }, contextWindowCompression: { slidingWindow: {} } } },
   httpOptions: { apiVersion: 'v1alpha' } } })   // no lockAdditionalFields → whole setup locked
@@ -78,9 +78,31 @@ Never the real key, the instructions or the tool list. `SessionEvent provider.re
   16 kHz → PCM16 LE base64 → `sendRealtimeInput({ audio: { data, mimeType:'audio/pcm;rate=16000' } })`; only
   while listening (not muted/paused, push-to-talk held). Mute/pause/PTT release/"I'm done" →
   `sendRealtimeInput({ audioStreamEnd: true })`.
+- **Echo gate** (`mic-gate.ts`, `MicGate`): while the agent is audible (+300 ms hangover) mic chunks are *not*
+  sent — through speakers the agent's own voice came back into the mic and Gemini's activity detection
+  treated it as the participant interrupting (the agent stopped mid-sentence, then answered its own echo and
+  repeated the greeting). The local energy VAD (raised threshold + 300 ms confirmation while the agent
+  plays) opens the gate when the participant really talks; the last ≤500 ms of withheld audio (pre-roll)
+  is sent first so the first syllable is kept, the agent is **ducked** (−12 dB) at once and, if the
+  participant keeps talking for 1.2 s over a turn the model had already finished, playback is **cut** and
+  the saved turn is updated with what was heard (`interrupted:true`). When the participant stops while the
+  agent is still talking (no `interrupted` came back) → `audioStreamEnd`, so Gemini closes that activity.
+  When the agent finishes, the pre-roll is only kept if energy was already rising (a quick overlapping
+  reply); otherwise it is echo and dropped. Push-to-talk held always streams.
 - Model audio (`serverContent.modelTurn.parts[].inlineData`, `audio/pcm;rate=24000`) → the shared
-  `AudioPlayer` (WebAudio queue → speakers **and** the recording mix), `agentSpeaking` from audibility.
-- Transcripts: `inputTranscription` → participant item, `outputTranscription` → agent item; ids
+  `AudioPlayer` (WebAudio → speakers **and** the recording mix), `agentSpeaking` from audibility. The
+  player treats the chunks as one stream: PCM is resampled to the AudioContext rate by a resampler that
+  keeps its state across chunks (independently resampled 24 kHz chunks in a 44.1/48 kHz context clicked at
+  every seam), buffers are appended gaplessly to one timeline, a **jitter buffer** holds 300 ms before a
+  turn starts and before resuming after an underrun — the cushion grows by 150 ms per underrun (up to 1 s)
+  because a live model's first seconds can arrive slower than real time — audio is held at most 1.2 s after
+  the last chunk if the stream stops, the end of a turn flushes early, successive turns queue back to back
+  instead of cutting each other off, stops fade over 20 ms, and `duck()` lowers the agent while the
+  participant starts talking. `getStats()` (underruns, buffers, cushion) is exposed through `debugState()`.
+- Transcripts: `inputTranscription` → participant item (`interimInputTranscription`, when the model sends
+  it, only updates the caption), `outputTranscription` → agent item; `cleanTranscript()` strips Gemini's
+  non-speech placeholders (`<no speech>`, `{pause}`, `<noise>`, also while they arrive in pieces) and
+  punctuation-only fragments ("..."), so such turns are neither shown nor mirrored; ids
   `g<connId>_<n>_u|a` (new `connId` per connection, so the server's `rt_<itemId>` dedupe never merges items
   across reconnects). A participant item is committed when the model has started answering (+1.2 s grace
   for late chunks), on `finished`, or after 3.5 s without an answer; it is always reported **before** the
@@ -94,7 +116,10 @@ Never the real key, the instructions or the tool list. `SessionEvent provider.re
   authorizes, rate-limits, executes → `realtime.tool_result` → `sendToolResponse({ functionResponses: [{ id, name, response: { output } }] })`
   (one batch per tool-call message; 8 s safety flush); `toolCallCancellation` drops pending ids.
 - `realtime.instruction` → `sendClientContent({ turns:[{ role:'user', parts:[{ text:'[Session runtime instruction — not said by the participant…]\n…' }] }], turnComplete: respond })`,
-  **held while the model is generating** (client content interrupts generation) or tool calls are pending.
+  **held until the model is idle** — client content interrupts whatever the model is generating, so an
+  instruction waits while: the model is generating, we asked it for a response that has not started yet
+  (opening line, typed text, tool results; 8 s cap), its audio is still playing here, the participant is
+  talking or spoke in the last 2.5 s, or tool calls are pending (re-checked every 250 ms and on events).
 - Typed input in live mode is also handed to the model (`sendUserText`, both providers) — before, the
   OpenAI path persisted typed turns without the model hearing them.
 - `sessionResumptionUpdate` → keep the latest resumable handle; `goAway` or an unexpected close →
@@ -103,6 +128,39 @@ Never the real key, the instructions or the tool list. `SessionEvent provider.re
   connections are ignored.
 - The hook re-plans on adapter errors (`fallback:true`) exactly like the OpenAI path; `stop()` closes the
   socket, mic nodes, VAD and player; the shared mic track is never stopped.
+
+### Call flow fixes after the first real Gemini run (2026-09-27)
+A real call (Gemini Live, laptop speakers + mic) stuttered, the agent broke off mid-sentence, repeated the
+greeting three times and every transcript line showed twice. Causes and fixes:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Crackly, choppy voice; breaks that resume mid-sentence | Each ~100–200 ms PCM chunk was scheduled as its own 24 kHz `AudioBuffer` in a 48/44.1 kHz context (resampled in isolation → click at every seam) and started the instant it arrived (any arrival jitter → audible gap; measured: Gemini delivered the first 2.5 s of a greeting at ~0.7× real time) | `AudioPlayer`: stateful resampling to the context rate, gapless timeline, 300 ms jitter buffer that grows after underruns (≤ 1 s), slow streams held up to 1.2 s instead of being played in fragments, coalesced buffers, faded stops |
+| Agent stops and does not resume; greeting repeated; `...` agent turns; garbage participant transcripts | The agent's own voice came back through the mic; Gemini's server VAD (`START_SENSITIVITY_HIGH` by default) reported `interrupted`, the model then answered its own echo | Browser echo gate (`MicGate` + local VAD with a 400 ms echo warm-up and a 4× echo-floor bar, pre-roll, ducking, tail cut), `startOfSpeechSensitivity: START_SENSITIVITY_LOW` in the locked token setup, placeholder / punctuation-only transcriptions dropped |
+| Agent cut off right after the greeting / after tool results | A `realtime.instruction` (nudge, timed instruction, closing) sent as client content between "response requested" and the first audio chunk, or while the last turn's audio was still playing, interrupted the model | Instructions wait until the model is idle (generating, awaiting response, audio playing, participant talking → hold) |
+| Transcript rendered twice; last caption never cleared | The server saves live-model turns with `clientTurnId = rt_<itemId>`; the client store compared raw item ids, so streaming rows/captions were never replaced by the saved turn | `turnMatchesItem()` in `store.ts`; captions clear when the utterance commits; a participant utterance shows once while it is transcribed |
+| New agent turn cut the previous one's last words | The player treated a second turn as superseding the first | Turns queue back to back; only barge-in/stop interrupts |
+
+Verified against the real model: `apps/web/e2e/gemini-real.spec.ts` (opt-in, `E2E_REAL_GEMINI=1`,
+`E2E_SCENARIO_NAME="Active listening coaching"`; `E2E_ECHO=0.5` feeds everything the page plays back into
+the synthetic mic after 60 ms at half volume — worst-case speaker echo without echo cancellation). Result
+2026-09-27 (headless Chrome, `gemini-3.8-live`): with echo, the greeting played as one continuous 4.8 s run,
+0 underruns, mic gate closed for all 155 playing samples, no local speech start, mirrored once and not
+interrupted, one transcript row; without echo the same (5.6 s run). Before the cushion tuning the same
+greeting came out in 4 fragments with 3 underruns, and Gemini's silent-mic "`<no speech>{pause}`" turns
+showed as agent rows.
+
+Tests: `apps/web/e2e/unit.spec.ts` (resampler continuity and ratio, mic gate, VAD `aboveMs`, echo warm-up,
+transcript cleaning, store dedupe with `rt_` ids), `apps/web/e2e/gemini-live.spec.ts` (same protocol expectations against the new
+adapter; the session-socket proxy now also drops the real session's own `realtime.instruction` /
+`realtime.tool_result` messages, since seeded scenarios run live voice by default, and token requests
+carry `provider`), `realtime.spec.ts`, `live-providers.spec.ts` (VAD settings in the token). On a machine
+where Chrome's fake capture device never resolves `getUserMedia` (macOS without a system microphone
+permission for the launched browser), run the browser specs with `E2E_FAKE_MIC=1` (synthetic silent mic,
+see `e2e/helpers.ts`) and `E2E_CHROMIUM=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
+Tunables: `PREBUFFER_S`/`REBUFFER_S`/`MAX_CUSHION_S`/`MAX_HOLD_MS` (`audio-player.ts`), `GATE_HANGOVER_MS`,
+`PREROLL_CHUNKS`, `INPUT_SETTLE_MS`, `TAIL_CUT_MS` (`gemini-live.ts`), `agentWarmupMs`/`echoRatio`/`bargeInMs`
+(`vad.ts`).
 
 ## API facts verified (and where)
 All from `node_modules/@google/genai` **2.24.0** (`dist/genai.d.ts`, `dist/node/index.cjs`, `dist/web/index.mjs`)
