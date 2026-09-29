@@ -46,13 +46,13 @@ d('Developer platform, webhooks & channels (integration)', () => {
     const { Test } = await import('@nestjs/testing');
     const { FastifyAdapter } = await import('@nestjs/platform-fastify');
     const { WsAdapter } = await import('@nestjs/platform-ws');
-    env = (await import('../../config/env')).loadEnv();
-    const { AppModule } = await import('../../app.module');
-    const { QueueService } = await import('../../common/queue/queue.service');
-    const { PrismaService } = await import('../../common/prisma/prisma.service');
-    const { CryptoService } = await import('../../common/crypto/crypto.service');
-    const { REDIS } = await import('../../common/redis/redis.module');
-    const { WebhookDispatcherService } = await import('../webhooks/webhook-dispatcher.service');
+    env = (await import('../../config/env.js')).loadEnv();
+    const { AppModule } = await import('../../app.module.js');
+    const { QueueService } = await import('../../common/queue/queue.service.js');
+    const { PrismaService } = await import('../../common/prisma/prisma.service.js');
+    const { CryptoService } = await import('../../common/crypto/crypto.service.js');
+    const { REDIS } = await import('../../common/redis/redis.module.js');
+    const { WebhookDispatcherService } = await import('../webhooks/webhook-dispatcher.service.js');
 
     const noop = async () => undefined;
     const fakeQueueObj = new Proxy({ add: async () => ({}) } as any, { get: (t, k) => (k in t ? t[k] : noop) });
@@ -258,7 +258,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
       data: { scope: wsA, key: `busy-${uniq}`, method: 'POST', path: '/api/v1/scenarios', requestHash: 'x', expiresAt: new Date(Date.now() + 3600_000) },
     });
     // Same request hash as the in-flight one → 409.
-    const { requestHash } = await import('./v1/idempotency.interceptor');
+    const { requestHash } = await import('./v1/idempotency.interceptor.js');
     const hash = requestHash(crypto, 'POST', '/api/v1/scenarios', payload);
     await prisma.idempotencyRecord.update({ where: { scope_key: { scope: wsA, key: `busy-${uniq}` } }, data: { requestHash: hash } });
     const d2 = await inject({ method: 'POST', url: '/api/v1/scenarios', headers: { ...h, 'idempotency-key': `busy-${uniq}` }, payload });
@@ -341,7 +341,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect(h['User-Agent']).toBe('ConversaForge-Webhooks/1.0');
     expect(h['X-ConversaForge-Event']).toBe('session.started');
     expect(h['X-ConversaForge-Delivery']).toBe(delivery.id);
-    const { verifySignature } = await import('../webhooks/webhook-signature');
+    const { verifySignature } = await import('../webhooks/webhook-signature.js');
     expect(verifySignature(sub.secret, h['X-ConversaForge-Signature'], seen[0].body)).toBe(true);
     const [t, v1] = h['X-ConversaForge-Signature'].split(',');
     expect(v1.slice(3)).toBe(createHmac('sha256', sub.secret).update(`${t.slice(2)}.${seen[0].body}`).digest('hex'));
@@ -394,7 +394,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
     const s = await inject({ method: 'POST', url: '/api/v1/sessions', headers: { ...json, ...auth(fullKey) }, payload: { scenarioId, participant: { externalId: 'wh-2' } } });
     await dispatcher.produce({ workspaceId: wsA, sessionId: s.json().sessionId, type: 'session.completed', variant: '' });
     expect(await prisma.webhookDelivery.count({ where: { subscriptionId: sub.id } })).toBe(0);
-    const { terminalStateToEvent } = await import('../webhooks/webhook-payload');
+    const { terminalStateToEvent } = await import('../webhooks/webhook-payload.js');
     expect(terminalStateToEvent('CANCELLED')).toBeNull();
   });
 
@@ -433,7 +433,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
     });
     const params: Record<string, string> = { AccountSid: 'AC' + 'a'.repeat(32), CallSid: `CA${uniq}`, From: '+14155550123', To: e164 };
     const url = `${env.API_PUBLIC_URL.replace(/\/$/, '')}/api/channels/twilio/voice`;
-    const { computeTwilioSignature } = await import('../channels/twilio/twilio-signature');
+    const { computeTwilioSignature } = await import('../channels/twilio/twilio-signature.js');
     const sig = computeTwilioSignature(authToken, url, params);
     const r = await inject({
       method: 'POST',
@@ -469,7 +469,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/channels/availability`, headers: auth(otherToken) })).statusCode).toBe(404);
   });
   it('meeting bots (Recall.ai, faked HTTP): create → realtime transcript → Svix status → COMPLETED session', async () => {
-    const { MeetingsService } = await import('../channels/meetings.service');
+    const { MeetingsService } = await import('../channels/meetings.service.js');
     const meetings = app.get(MeetingsService);
     await prisma.providerConnection.create({
       data: { workspaceId: wsA, provider: 'recall', kind: 'MEETING', encryptedSecret: crypto.encrypt('recall_test_key'), config: { region: 'eu-central-1' } },
@@ -536,7 +536,7 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect(await prisma.transcriptTurn.count({ where: { sessionId: bot.sessionId } })).toBe(2);
   });
   it('batch scheduler dials with the concurrency limit and completes from call outcomes', async () => {
-    const { BatchesService } = await import('../channels/batches.service');
+    const { BatchesService } = await import('../channels/batches.service.js');
     const batches = app.get(BatchesService);
     // Speech providers present (fake keys; nothing is called in this test) → phone channel "ready".
     for (const provider of ['deepgram', 'elevenlabs']) {

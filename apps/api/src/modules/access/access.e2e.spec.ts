@@ -358,7 +358,7 @@ describe('access & sharing (integration)', () => {
     });
 
     it('SECURITY: an unverified account cannot claim email grants or participant history for its address until it verifies', async () => {
-      const { AuthService } = await import('../auth/auth.service');
+      const { AuthService } = await import('../auth/auth.service.js');
       const auth = h.get(AuthService);
       // A victim ran a share link anonymously with their email before having an account.
       const victimEmail = `victim-${h.uid()}@test.example`;

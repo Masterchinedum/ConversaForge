@@ -225,7 +225,7 @@ describe('organization admin (integration)', () => {
       expect((await h.req('PUT', `${base()}/quotas`, { token: org.admin.token, body: { metric: 'cost_micros', limitValue: 10_000_000 } })).statusCode).toBe(403);
       const q = await h.req('PUT', `${base()}/quotas`, { token: org.owner.token, body: { metric: 'cost_micros', limitValue: 10_000_000, alertThresholdPct: 80, hardLimit: true } });
       expect(q.statusCode).toBe(200);
-      const { UsageAdminService } = await import('./usage-admin.service');
+      const { UsageAdminService } = await import('./usage-admin.service.js');
       const svc = h.get(UsageAdminService);
       h.mails.length = 0;
       await svc.checkAllWorkspaces();
@@ -284,7 +284,7 @@ describe('organization admin (integration)', () => {
     it('retention job deletes media, redacts transcripts and evidence, keeps scores — idempotently', async () => {
       const { s, key } = await participantWithData(`ret-${h.uid()}@x.example`);
       await h.prisma.session.update({ where: { id: s.id }, data: { retentionUntil: new Date(Date.now() - 1000) } });
-      const { PrivacyService, REDACTED_TEXT } = await import('./privacy.service');
+      const { PrivacyService, REDACTED_TEXT } = await import('./privacy.service.js');
       const svc = h.get(PrivacyService);
       const first = await svc.runRetention();
       expect(first.sessionsRedacted).toBeGreaterThanOrEqual(1);
@@ -317,7 +317,7 @@ describe('organization admin (integration)', () => {
       expect(r.statusCode).toBe(201);
       expect(r.json().status).toBe('PENDING');
       expect((await h.req('POST', `${base()}/privacy/requests/${r.json().id}/download`, { token: org.admin.token })).statusCode).toBe(409);
-      const { PrivacyService } = await import('./privacy.service');
+      const { PrivacyService } = await import('./privacy.service.js');
       await h.get(PrivacyService).process(r.json().id);
       const done = (await h.req('GET', `${base()}/privacy/requests/${r.json().id}`, { token: org.admin.token })).json();
       expect(done.status).toBe('COMPLETED');
@@ -341,7 +341,7 @@ describe('organization admin (integration)', () => {
       expect(noConfirm.statusCode).toBe(422);
       const r = await h.req('POST', `${base()}/privacy/requests`, { token: org.admin.token, body: { type: 'DELETE', participantId: p.id, confirm: p.id } });
       expect(r.statusCode).toBe(201);
-      const { PrivacyService } = await import('./privacy.service');
+      const { PrivacyService } = await import('./privacy.service.js');
       await h.get(PrivacyService).process(r.json().id);
       expect(await h.prisma.session.findUnique({ where: { id: s.id } })).toBeNull();
       expect(await h.prisma.transcriptTurn.count({ where: { sessionId: s.id } })).toBe(0);

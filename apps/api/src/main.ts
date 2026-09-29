@@ -15,7 +15,7 @@ async function bootstrap() {
   const env = loadEnv();
   workerRuntime.enabled = env.RUN_WORKERS_IN_API;
   // Import after env validation so modules can read config at construction time.
-  const { AppModule } = await import('./app.module');
+  const { AppModule } = await import('./app.module.js');
 
   const adapter = new FastifyAdapter({
     // Only trust X-Forwarded-For from our own proxies (Caddy/Next on private networks), so clients

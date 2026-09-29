@@ -76,13 +76,19 @@
       "^.+\\.ts$": [
         "ts-jest",
         {
-          "tsconfig": "tsconfig.json",
+          "tsconfig": {
+            "module": "commonjs",
+            "moduleResolution": "node10"
+          },
           "isolatedModules": true
         }
       ]
     },
     "testEnvironment": "node",
     "testTimeout": 30000,
-    "globalSetup": "<rootDir>/test/global-setup.ts"
+    "globalSetup": "<rootDir>/test/global-setup.ts",
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    }
   }
 }

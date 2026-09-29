@@ -310,7 +310,7 @@ d('CustomFunctionsService (integration)', () => {
       enabled: true,
     });
     const saved = ctx.functions.guardDeps;
-    ctx.functions.guardDeps = { lookup: async () => [{ address: '10.0.0.8', family: 4 }], isBlockedIp: (await import('./ssrf-guard')).isBlockedIp };
+    ctx.functions.guardDeps = { lookup: async () => [{ address: '10.0.0.8', family: 4 }], isBlockedIp: (await import('./ssrf-guard.js')).isBlockedIp };
     try {
       expect(await ctx.functions.execute(ws.id, fn.id, {})).toMatchObject({ ok: false, errorCode: 'blocked_ip' });
     } finally {

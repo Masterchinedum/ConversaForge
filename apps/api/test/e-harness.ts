@@ -41,9 +41,9 @@ export class Harness {
   private ipSeq = 0;
 
   async start() {
-    const { loadEnv } = await import('../src/config/env');
+    const { loadEnv } = await import('../src/config/env.js');
     loadEnv();
-    const { AppModule } = await import('../src/app.module');
+    const { AppModule } = await import('../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     this.app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ trustProxy: true, maxParamLength: 2048 }), { logger: ['error'] });
     // @fastify/cookie is not registered: it lazy-loads `cookie` via dynamic import, which jest's VM
@@ -54,9 +54,9 @@ export class Harness {
     this.app.useWebSocketAdapter(new WsAdapter(this.app));
     await this.app.init();
     await this.app.getHttpAdapter().getInstance().ready();
-    const { PrismaService } = await import('../src/common/prisma/prisma.service');
-    const { CryptoService } = await import('../src/common/crypto/crypto.service');
-    const { MailService } = await import('../src/common/mail/mail.service');
+    const { PrismaService } = await import('../src/common/prisma/prisma.service.js');
+    const { CryptoService } = await import('../src/common/crypto/crypto.service.js');
+    const { MailService } = await import('../src/common/mail/mail.service.js');
     this.prisma = this.app.get(PrismaService);
     this.crypto = this.app.get(CryptoService);
     const mail = this.app.get(MailService);

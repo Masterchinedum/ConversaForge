@@ -8,7 +8,7 @@ import { workerRuntime } from './common/queue/queue.service';
 async function bootstrap() {
   loadEnv();
   workerRuntime.enabled = true;
-  const { AppModule } = await import('./app.module');
+  const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['log', 'error', 'warn'] });
   app.enableShutdownHooks();
   Logger.log('Worker started', 'Worker');

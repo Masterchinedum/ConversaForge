@@ -1,0 +1,6 @@
+{
+  // Use the workspace TypeScript (the version tsc, ts-jest and Next run with) instead of VS Code's bundled one,
+  // so editor diagnostics match the CLI.
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}

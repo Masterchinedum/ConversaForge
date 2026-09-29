@@ -28,16 +28,16 @@ export function prepareEnv() {
 export async function createGTestContext() {
   prepareEnv();
   // Import lazily so env is prepared first.
-  const { CryptoService } = await import('../../common/crypto/crypto.service');
-  const { StorageService } = await import('../../common/storage/storage.service');
-  const { AuditService } = await import('../../common/audit/audit.service');
-  const { DomainEvents } = await import('../../common/events/domain-events');
-  const { UsageService } = await import('../usage/usage.service');
-  const { LlmService } = await import('../../common/llm/llm.service');
-  const { KnowledgeService } = await import('./knowledge.service');
-  const { NoopEmbeddingProvider } = await import('./embeddings');
-  const { ProvidersService } = await import('../providers/providers.service');
-  const { CustomFunctionsService } = await import('../providers/custom-functions.service');
+  const { CryptoService } = await import('../../common/crypto/crypto.service.js');
+  const { StorageService } = await import('../../common/storage/storage.service.js');
+  const { AuditService } = await import('../../common/audit/audit.service.js');
+  const { DomainEvents } = await import('../../common/events/domain-events.js');
+  const { UsageService } = await import('../usage/usage.service.js');
+  const { LlmService } = await import('../../common/llm/llm.service.js');
+  const { KnowledgeService } = await import('./knowledge.service.js');
+  const { NoopEmbeddingProvider } = await import('./embeddings.js');
+  const { ProvidersService } = await import('../providers/providers.service.js');
+  const { CustomFunctionsService } = await import('../providers/custom-functions.service.js');
 
   const prisma = new PrismaClient({ datasources: { db: { url: G_TEST_DB! } } }) as any;
   const crypto = new CryptoService();
