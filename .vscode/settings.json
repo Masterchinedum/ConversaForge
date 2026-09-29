@@ -1,6 +1,7 @@
 {
   // Use the workspace TypeScript (the version tsc, ts-jest and Next run with) instead of VS Code's bundled one,
-  // so editor diagnostics match the CLI.
-  "typescript.tsdk": "node_modules/typescript/lib",
+  // so editor diagnostics match `pnpm typecheck`. The root has no direct typescript dependency (pnpm keeps each
+  // package's copy, all the same version), so point at one package's copy.
+  "typescript.tsdk": "apps/api/node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true
 }

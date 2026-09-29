@@ -52,6 +52,17 @@ The API must be compiled with `tsc` (Nest needs `emitDecoratorMetadata`; tsx/esb
 Run a one-off API: `cd apps/api && npx tsc -p tsconfig.build.json && PORT=4100 node dist/main.js`.
 Run a web dev server on another port without clobbering others: `NEXT_DIST_DIR=.next-myname WEB_PORT=3100 API_INTERNAL_URL=http://localhost:4100 pnpm --filter @cf/web dev`.
 
+### TypeScript module settings
+`apps/api` and `packages/shared` compile to CommonJS with `"module": "nodenext"` / `"moduleResolution": "nodenext"`
+(no `baseUrl`; the `node10` resolver and `baseUrl` are deprecated in TypeScript 6 and removed in 7). Under
+`nodenext` a dynamic `import()` in a CommonJS file is an ES-module import: write relative specifiers with the
+`.js` extension (`await import('./app.module.js')`) and expect a real `import()` at runtime (which is also what
+makes ESM-only packages such as `unpdf` loadable). Jest cannot run `import()` in its CommonJS VM, so ts-jest
+transpiles tests with `module: commonjs` (the call becomes `require`) and `moduleNameMapper` maps the `.js`
+suffix back to the `.ts` source (see the `jest` block in `apps/api/package.json`). The web app uses
+`moduleResolution: bundler` (Next.js). `.vscode/settings.json` pins the editor to the workspace TypeScript so
+diagnostics match `pnpm typecheck`.
+
 ### Schema changes
 - `apps/api/prisma/schema.prisma` is the single schema. Production uses migrations in `apps/api/prisma/migrations` (`prisma migrate deploy`).
 - The initial migration was generated with `apps/api/scripts/create-initial-migration.sh` (schema + `prisma/sql/post-push.sql`). After launch, never regenerate it: create new migrations with `cd apps/api && pnpm prisma:dev --name <change>`, review the SQL, and keep them backward compatible (expand → deploy → contract).
