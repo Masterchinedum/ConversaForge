@@ -14,6 +14,8 @@ interface Availability {
   publicUrl: { apiPublicUrl: string; ok: boolean; reason: string | null };
   phoneReady: boolean;
   meetingsReady: boolean;
+  botPage: { webPublicUrl: string; ok: boolean; reason: string | null };
+  meetingAgentsReady: boolean;
 }
 interface PhoneNumber {
   id: string;
@@ -49,6 +51,7 @@ interface Bot {
   sessionId: string | null;
   lastError: string | null;
   botName: string | null;
+  mode: 'notetaker' | 'agent';
   createdAt: string;
 }
 
@@ -634,19 +637,21 @@ function MeetingsTab({ av }: { av: Availability }) {
   const { wsPath, href } = useWorkspace();
   const toast = useToast();
   const bots = useSWR<{ data: Bot[] }>([wsPath('/channels/meeting-bots'), { limit: 50 }], { refreshInterval: 10_000 });
-  const [form, setForm] = useState({ meetingUrl: '', scenarioId: '', joinAt: '', evaluatedSpeakerName: '' });
+  const [form, setForm] = useState({ meetingUrl: '', scenarioId: '', joinAt: '', evaluatedSpeakerName: '', mode: 'agent' as Bot['mode'] });
+  const agent = form.mode === 'agent';
   const [busy, setBusy] = useState(false);
   return (
     <div className="space-y-6">
-      <Card title="Send a notetaker bot to a meeting">
+      <Card title="Send a bot to a meeting">
         <p className="mb-3 text-sm text-slate-600">
-          A Recall.ai bot joins the Zoom / Google Meet / Teams meeting, transcribes it in real time, and the meeting is analysed with the scenario’s rubric and extraction when it ends.
-          Tell participants the meeting is being transcribed. Calendar auto-join (Google Calendar) is not implemented — schedule bots per meeting link.
+          A Recall.ai bot joins the Zoom / Google Meet / Teams meeting. As an <strong>AI agent</strong> it plays the scenario’s persona and talks with the people in the call; as a{' '}
+          <strong>notetaker</strong> it only transcribes. Either way the session is analysed with the scenario’s rubric and extraction when it ends. Tell participants the meeting is
+          being transcribed. Calendar auto-join (Google Calendar) is not implemented — schedule bots per meeting link.
         </p>
-        {!av.meetingsReady && (
+        {!(agent ? av.meetingAgentsReady : av.meetingsReady) && (
           <div className="mb-3">
-            <Alert tone="warning" title="New bots will be BLOCKED until Recall.ai is configured">
-              {[av.recall.reason, av.publicUrl.reason].filter(Boolean).join(' ')}
+            <Alert tone="warning" title="New bots will be BLOCKED until this is configured">
+              {[av.recall.reason, av.publicUrl.reason, agent ? av.botPage.reason : null].filter(Boolean).join(' ')}
             </Alert>
           </div>
         )}
@@ -661,8 +666,9 @@ function MeetingsTab({ av }: { av: Availability }) {
                 body: {
                   meetingUrl: form.meetingUrl,
                   scenarioId: form.scenarioId,
+                  mode: form.mode,
                   ...(form.joinAt ? { joinAt: new Date(form.joinAt).toISOString() } : {}),
-                  ...(form.evaluatedSpeakerName ? { evaluatedSpeakerName: form.evaluatedSpeakerName } : {}),
+                  ...(!agent && form.evaluatedSpeakerName ? { evaluatedSpeakerName: form.evaluatedSpeakerName } : {}),
                 },
               });
               if (r.status === 'BLOCKED' || r.status === 'FAILED') toast.error(`${r.status}: ${r.lastError}`);
@@ -678,15 +684,25 @@ function MeetingsTab({ av }: { av: Availability }) {
           <Field label="Meeting link" required>
             {(id) => <Input id={id} placeholder="https://meet.google.com/abc-defg-hij" value={form.meetingUrl} onChange={(e) => setForm({ ...form, meetingUrl: e.target.value })} />}
           </Field>
+          <Field label="Bot" hint={agent ? 'The persona speaks; the session starts when someone in the meeting talks.' : 'Listens and transcribes only.'}>
+            {(id) => (
+              <Select id={id} value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as Bot['mode'] })}>
+                <option value="agent">AI agent (plays the scenario)</option>
+                <option value="notetaker">Notetaker (transcribe a real meeting)</option>
+              </Select>
+            )}
+          </Field>
           <Field label="Scenario (rubric & extraction)" required>
             {(id) => <ScenarioSelect id={id} value={form.scenarioId} onChange={(v) => setForm({ ...form, scenarioId: v })} />}
           </Field>
-          <Field label="Join at (optional)" hint="Empty = join now.">
+          <Field label="Join at (optional)" hint={agent ? 'Empty = join now. At most 20 hours ahead.' : 'Empty = join now.'}>
             {(id) => <Input id={id} type="datetime-local" value={form.joinAt} onChange={(e) => setForm({ ...form, joinAt: e.target.value })} />}
           </Field>
-          <Field label="Evaluated speaker (optional)" hint="Display name of the person being evaluated; others are treated as the counterpart.">
-            {(id) => <Input id={id} value={form.evaluatedSpeakerName} onChange={(e) => setForm({ ...form, evaluatedSpeakerName: e.target.value })} />}
-          </Field>
+          {!agent && (
+            <Field label="Evaluated speaker (optional)" hint="Display name of the person being evaluated; others are treated as the counterpart.">
+              {(id) => <Input id={id} value={form.evaluatedSpeakerName} onChange={(e) => setForm({ ...form, evaluatedSpeakerName: e.target.value })} />}
+            </Field>
+          )}
           <div className="sm:col-span-2">
             <Button type="submit" loading={busy} disabled={!form.meetingUrl || !form.scenarioId}>
               Schedule bot
@@ -714,7 +730,10 @@ function MeetingsTab({ av }: { av: Availability }) {
               {bots.data.data.map((b) => (
                 <tr key={b.id}>
                   <Td className="max-w-xs truncate">
-                    <span className="mr-1 text-xs text-slate-500">{b.platform?.replace('_', ' ')}</span>
+                    <span className="mr-1 text-xs text-slate-500">
+                      {b.mode === 'agent' ? 'AI agent · ' : ''}
+                      {b.platform?.replace('_', ' ')}
+                    </span>
                     {b.meetingUrl}
                   </Td>
                   <Td className="whitespace-normal">
@@ -775,6 +794,7 @@ export default function ChannelsPage() {
             <ProviderBanner ok={av.data.speech.ready} title="Server speech (phone)" okText={`STT ${av.data.speech.stt}, TTS ${av.data.speech.tts}`} reason={av.data.speech.reason} />
             <ProviderBanner ok={av.data.recall.configured} title="Recall.ai" okText={`Configured (${av.data.recall.region})`} reason={av.data.recall.reason} />
             <ProviderBanner ok={av.data.publicUrl.ok} title="Public API URL" okText={av.data.publicUrl.apiPublicUrl} badText={`${av.data.publicUrl.apiPublicUrl} is not publicly reachable`} reason={av.data.publicUrl.reason} />
+            <ProviderBanner ok={av.data.botPage.ok} title="Public web URL (meeting agents)" okText={av.data.botPage.webPublicUrl} badText={`${av.data.botPage.webPublicUrl} is not publicly reachable`} reason={av.data.botPage.reason} />
           </div>
           <Tabs
             tabs={[

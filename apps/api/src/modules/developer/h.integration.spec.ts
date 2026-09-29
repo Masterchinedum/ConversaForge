@@ -13,6 +13,8 @@ if (DB) {
   process.env.DATABASE_URL = DB;
   // A public https API URL so meeting bots are not BLOCKED for reachability; Svix secret for Recall webhooks.
   process.env.API_PUBLIC_URL = 'https://api.h-test.example';
+  // Meeting agent bots open the web app's bot page, so the web app must look public too.
+  process.env.WEB_PUBLIC_URL = 'https://app.h-test.example';
   process.env.RECALL_WEBHOOK_SECRET = `whsec_${Buffer.from('recall-h-test-secret-0123456789').toString('base64')}`;
 }
 const d = DB ? describe : describe.skip;
@@ -534,6 +536,94 @@ d('Developer platform, webhooks & channels (integration)', () => {
     // Late utterances after completion are ignored.
     await inject({ method: 'POST', url, headers: json, payload: utter('Dana', 'late', 99) });
     expect(await prisma.transcriptTurn.count({ where: { sessionId: bot.sessionId } })).toBe(2);
+  });
+  it('meeting agent bots (Recall output media, faked HTTP): member sends the persona → bot page session → meeting end / session end', async () => {
+    const { MeetingsService } = await import('../channels/meetings.service.js');
+    const { RuntimeService } = await import('../runtime/runtime.service.js');
+    const meetings = app.get(MeetingsService);
+    if (!(await prisma.providerConnection.findFirst({ where: { workspaceId: wsA, provider: 'recall' } }))) {
+      await prisma.providerConnection.create({
+        data: { workspaceId: wsA, provider: 'recall', kind: 'MEETING', encryptedSecret: crypto.encrypt('recall_test_key'), config: { region: 'eu-central-1' } },
+      });
+    }
+    const calls: Array<{ url: string; init: any }> = [];
+    let n = 0;
+    meetings.fetchImpl = (async (url: string, init: any) => {
+      calls.push({ url, init });
+      if (init.method === 'POST' && url.endsWith('/bot/')) return new Response(JSON.stringify({ id: `bot_agent_${++n}` }), { status: 201 });
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as any;
+    const practice = (payload: unknown, token = userToken) =>
+      inject({ method: 'POST', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots`, headers: { ...json, ...auth(token) }, payload });
+
+    // Agent bots must join within the bot page's session-token lifetime.
+    const tooLate = await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij', joinAt: new Date(Date.now() + 30 * 3600_000).toISOString() });
+    expect(tooLate.statusCode).toBe(422);
+    expect((await practice({ meetingUrl: 'https://example.com/not-a-meeting' })).statusCode).toBe(422);
+    // Non-members cannot send bots into this workspace's scenarios.
+    expect((await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' }, otherToken)).statusCode).toBe(404);
+
+    const r = await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' });
+    expect(r.statusCode).toBe(201);
+    const bot = r.json();
+    expect(bot).toMatchObject({ mode: 'agent', status: 'JOINING', platform: 'google_meet', providerBotId: 'bot_agent_1' });
+    expect(bot.botName).toMatch(/\(AI\)$|^AI practice partner$/);
+    const sent = JSON.parse(calls[0]!.init.body);
+    expect(sent.recording_config).toBeUndefined();
+    expect(sent.variant).toEqual({ zoom: 'web_4_core', google_meet: 'web_4_core', microsoft_teams: 'web_4_core' });
+    const pageUrl = new URL(sent.output_media.camera.config.url);
+    expect(pageUrl.origin + pageUrl.pathname).toBe(`https://app.h-test.example/bot/${bot.sessionId}`);
+    const pageToken = decodeURIComponent(pageUrl.hash.replace(/^#t=/, ''));
+    expect(pageToken).toMatch(/^cfs_/);
+
+    // The session belongs to the member, is consented, and is not forced onto the phone pipeline.
+    const session = await prisma.session.findUnique({ where: { id: bot.sessionId }, include: { participant: true } });
+    expect(session).toMatchObject({ channel: 'MEETING', state: 'READY', externalRef: 'bot_agent_1' });
+    expect(session.participant.userId).toBeTruthy();
+    expect(JSON.stringify(session.providerInfo)).not.toMatch(/browser only/);
+    // The bot page authenticates with the token from its URL.
+    const boot = await inject({ method: 'GET', url: `/api/runtime/sessions/${bot.sessionId}`, headers: auth(pageToken) });
+    expect(boot.statusCode).toBe(200);
+    expect(boot.json().consent.given).toBeTruthy();
+
+    // Members read their own bots only; realtime transcript webhooks are ignored for agents.
+    expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${bot.id}`, headers: auth(userToken) })).json().status).toBe('JOINING');
+    const hook = new URL(meetings.realtimeEndpointUrl(bot.id));
+    await inject({
+      method: 'POST',
+      url: `/api/channels/recall/webhook${hook.search}`,
+      headers: json,
+      payload: { event: 'transcript.data', data: { data: { words: [{ text: 'hi' }], participant: { id: 1, name: 'Dana' } }, bot: { id: 'bot_agent_1' } } },
+    });
+    expect(await prisma.transcriptTurn.count({ where: { sessionId: bot.sessionId } })).toBe(0);
+
+    // The meeting ends before anyone spoke → the session is closed (never started → CANCELLED).
+    const body = JSON.stringify({ event: 'bot.call_ended', data: { data: { code: 'call_ended' }, bot: { id: 'bot_agent_1', metadata: { conversaforge_bot_id: bot.id } } } });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const key = Buffer.from(process.env.RECALL_WEBHOOK_SECRET!.slice(6), 'base64');
+    const sig = createHmac('sha256', key).update(`msg_agent.${ts}.${body}`).digest('base64');
+    const ended = await inject({ method: 'POST', url: '/api/channels/recall/webhook', headers: { ...json, 'webhook-id': 'msg_agent', 'webhook-timestamp': ts, 'webhook-signature': `v1,${sig}` }, payload: body });
+    expect(ended.statusCode).toBe(200);
+    expect((await prisma.session.findUnique({ where: { id: bot.sessionId } })).state).toBe('CANCELLED');
+    expect((await prisma.meetingBot.findUnique({ where: { id: bot.id } })).status).toBe('COMPLETED');
+
+    // The session ends on our side (agent closed it, time limit, …) → the bot leaves the meeting.
+    const second = (await practice({ meetingUrl: 'https://us02web.zoom.us/j/1234567890' })).json();
+    expect(second).toMatchObject({ mode: 'agent', status: 'JOINING', providerBotId: 'bot_agent_2' });
+    const engine = await app.get(RuntimeService).getEngine(second.sessionId);
+    await engine.closeSession('test_end', 'system');
+    const waitFor = async (fn: () => Promise<boolean>) => {
+      for (let i = 0; i < 50 && !(await fn()); i++) await new Promise((res) => setTimeout(res, 20));
+    };
+    await waitFor(async () => (await prisma.meetingBot.findUnique({ where: { id: second.id } })).status === 'COMPLETED');
+    expect((await prisma.meetingBot.findUnique({ where: { id: second.id } })).status).toBe('COMPLETED');
+    expect(calls.some((c) => c.url.endsWith('/bot/bot_agent_2/leave_call/') && c.init.method === 'POST')).toBe(true);
+
+    // Cancelling from the practice dialog removes the bot and closes its session.
+    const third = (await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })).json();
+    const cancelled = await inject({ method: 'POST', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${third.id}/cancel`, headers: auth(userToken) });
+    expect(cancelled.json().status).toBe('CANCELLED');
+    expect((await prisma.session.findUnique({ where: { id: third.sessionId } })).state).toBe('CANCELLED');
   });
   it('batch scheduler dials with the concurrency limit and completes from call outcomes', async () => {
     const { BatchesService } = await import('../channels/batches.service.js');

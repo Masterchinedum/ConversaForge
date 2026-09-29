@@ -193,6 +193,13 @@ describe('ProviderResolverService: live provider choice and fallbacks', () => {
     const pi = await resolve({ google: { secret: 'g' } }, {}, 'PHONE_INBOUND');
     expect(pi.voiceMode).toBe('pipeline');
     expect(pi.fallbacks[0]).toMatch(/browser only/);
+    expect((await resolve({ google: { secret: 'g' } }, {}, 'MEETING')).voiceMode).toBe('pipeline');
+  });
+
+  it('meeting agent bots (audio in the bot page) get live voice like the browser', async () => {
+    const pi = await new ProviderResolverService(fakeLlm({ google: { secret: 'g' } })).resolve('ws', cfg({}), { channel: 'MEETING', mediaInBrowser: true });
+    expect(pi.voiceMode).toBe('realtime');
+    expect(pi.realtime?.provider).toBe('google');
   });
 
   it('pickLiveProvider / liveModel helpers', () => {

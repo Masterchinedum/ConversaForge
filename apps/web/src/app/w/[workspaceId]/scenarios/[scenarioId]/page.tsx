@@ -35,6 +35,7 @@ import {
   FirstTurnEditor,
 } from '@/components/scenarios/sections';
 import { StatusBadge } from '@/components/scenarios/status-badge';
+import { MeetingPracticeModal } from '@/components/scenarios/meeting-practice';
 import { startSelfRun } from '@/components/scenarios/new-scenario';
 import { NumberField, TextAreaField, TextField, ToggleField } from '@/components/scenarios/fields';
 import type { ScenarioDetail } from '@/components/scenarios/types';
@@ -63,6 +64,7 @@ export default function ScenarioEditorPage() {
   const [showPublish, setShowPublish] = useState(false);
   const [showAssistant, setShowAssistant] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [meetingOpen, setMeetingOpen] = useState(false);
 
   const revisionRef = useRef(0);
   const seqRef = useRef(0);
@@ -343,7 +345,17 @@ export default function ScenarioEditorPage() {
           <Button variant="ghost" size="sm" onClick={tryIt} loading={starting} disabled={!published} title={published ? 'Start a practice session with the latest published version' : 'Publish first'}>
             ▶ Try it
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setMeetingOpen(true)}
+            disabled={!published || !config.channels.meeting.enabled}
+            title={!published ? 'Publish first' : !config.channels.meeting.enabled ? 'Turn on Channels → Meeting bot, then publish' : 'The AI persona joins your Zoom / Google Meet / Teams meeting'}
+          >
+            Practice in a meeting
+          </Button>
         </nav>
+        <MeetingPracticeModal open={meetingOpen} onClose={() => setMeetingOpen(false)} wsPath={wsPath} scenarioId={s.id} personaName={config.persona.name} />
 
         {saveState === 'conflict' && (
           <Alert tone="error" title="This draft was changed somewhere else">

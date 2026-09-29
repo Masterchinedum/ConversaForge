@@ -1190,6 +1190,7 @@ model MeetingBot {
   botName              String?
   evaluatedSpeakerName String? // transcript speakers with this name are the evaluated participant
   lastEventAt          DateTime?
+  mode                 String    @default("notetaker") // notetaker (transcribe only) | agent (the AI persona speaks via Recall output media)
   createdById     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

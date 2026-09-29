@@ -42,6 +42,8 @@ export interface CreateSessionInput {
   consent?: { recordAudio: boolean; recordVideo: boolean; analysis: boolean; source?: string };
   /** Optional (additive): external reference such as a telephony call sid. */
   externalRef?: string;
+  /** Optional (additive): audio is handled by a browser page although the channel is not BROWSER (meeting agent bot). */
+  mediaInBrowser?: boolean;
 }
 
 export interface LoadedSession {
@@ -102,7 +104,7 @@ export class SessionsService {
     const wsMax = typeof settings.maxSessionMinutes === 'number' ? settings.maxSessionMinutes : env.DEFAULT_MAX_SESSION_MINUTES;
     const maxDurationSec = Math.max(60, Math.round(Math.min(config.conversation.ending.maxDurationMinutes, wsMax) * 60));
 
-    const providerInfo = await this.providers.resolve(workspaceId, config, { channel: input.channel, workspaceSettings: settings });
+    const providerInfo = await this.providers.resolve(workspaceId, config, { channel: input.channel, workspaceSettings: settings, mediaInBrowser: input.mediaInBrowser });
 
     const participant = await this.upsertParticipant(workspaceId, input.participant);
 

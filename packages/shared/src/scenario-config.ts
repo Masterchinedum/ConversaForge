@@ -502,10 +502,11 @@ export function validateScenarioForPublish(input: unknown): {
       issues.push({ path: 'model.realtimeModel', message: 'This does not look like a Gemini Live model but the live provider is Google Gemini Live', severity: 'warning' });
     }
   }
-  if (c.model.voiceMode === 'realtime' && (c.channels.phone.enabled || c.channels.meeting.enabled)) {
+  // Meeting agent bots run the call in a browser page (Recall output media), so live voice works there.
+  if (c.model.voiceMode === 'realtime' && c.channels.phone.enabled) {
     issues.push({
       path: 'model.voiceMode',
-      message: 'Live speech-to-speech runs in the browser only; phone and meeting sessions use the speech pipeline (STT → LLM → TTS)',
+      message: 'Live speech-to-speech runs in the browser only; phone sessions use the speech pipeline (STT → LLM → TTS)',
       severity: 'warning',
     });
   }

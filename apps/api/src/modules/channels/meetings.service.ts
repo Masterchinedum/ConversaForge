@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { Prisma, type MeetingBot } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { isTerminal, type SessionState } from '@cf/shared';
@@ -13,10 +13,11 @@ import { prismaPageArgs, toPage, type PaginationQuery } from '../../common/http/
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QUEUES, QueueService } from '../../common/queue/queue.service';
 import { UsageService } from '../usage/usage.service';
+import { RuntimeService } from '../runtime/runtime.service';
 import { parseVersionConfig, SessionsService } from '../runtime/sessions.service';
 import { ChannelProvidersService, RECALL_MISSING, type RecallCreds } from './channel-providers.service';
 import { transitionMeetingSession } from './meeting-session';
-import { mapRecallStatus, meetingPlatform, utteranceFromTranscriptEvent, verifySvixSignature } from './recall/recall';
+import { MEETING_BOT_MODES, mapRecallStatus, meetingPlatform, recallBotRequest, utteranceFromTranscriptEvent, verifySvixSignature, type MeetingBotMode } from './recall/recall';
 
 export const CreateMeetingBotBody = z
   .object({
@@ -27,20 +28,43 @@ export const CreateMeetingBotBody = z
     /** Transcript speakers with this display name are the evaluated participant; others are the counterpart. */
     evaluatedSpeakerName: z.string().trim().min(1).max(120).optional(),
     calendarEventId: z.string().trim().max(200).optional(),
+    /** notetaker: transcribe a real meeting. agent: the scenario's AI persona joins and talks. */
+    mode: z.enum(MEETING_BOT_MODES).default('notetaker'),
   })
   .strict();
 
+/** A member practising a scenario in their own meeting: the AI persona joins and talks. */
+export const PracticeMeetingBody = z
+  .object({
+    meetingUrl: z.string().trim().min(10).max(2000),
+    joinAt: z.coerce.date().optional().nullable(),
+  })
+  .strict();
+
+/** Who the evaluated participant is when a member starts the bot for their own practice. */
+export interface MeetingParticipant {
+  userId?: string | null;
+  email?: string | null;
+  name?: string | null;
+}
+
 const POLL_INTERVAL_MS = 60_000;
 const TERMINAL_BOT = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED']);
+/** The bot page authenticates with the session token (24 h TTL), so agent bots must join well within it. */
+const AGENT_MAX_LEAD_MS = 20 * 3600_000;
 
 /**
  * Meeting bots via Recall.ai: a bot joins a Zoom / Google Meet / Teams meeting, streams real-time
  * transcript utterances to our webhook, and the resulting MEETING session is analysed by the normal
  * pipeline when the meeting ends. Without Recall credentials the bot is stored as BLOCKED with the
  * exact reason — never simulated.
+ *
+ * Agent bots (mode "agent") instead open our bot page through Recall output media: the page runs a
+ * normal live session (engine attached, live voice) with the meeting as its microphone and speaker.
+ * The meeting ending closes the session; the session ending makes the bot leave.
  */
 @Injectable()
-export class MeetingsService {
+export class MeetingsService implements OnModuleInit {
   private readonly logger = new Logger('Meetings');
   fetchImpl: typeof fetch = fetch;
 
@@ -53,8 +77,12 @@ export class MeetingsService {
     private readonly queue: QueueService,
     private readonly audit: AuditService,
     private readonly usage: UsageService,
+    private readonly runtime: RuntimeService,
   ) {}
 
+  onModuleInit() {
+    this.events.on('session.terminal', ({ sessionId }) => this.leaveAfterSession(sessionId));
+  }
 
   endpointToken(botRowId: string) {
     return this.crypto.hmac(`recall-endpoint:${botRowId}`);
@@ -62,6 +90,11 @@ export class MeetingsService {
 
   realtimeEndpointUrl(botRowId: string) {
     return `${env.API_PUBLIC_URL.replace(/\/$/, '')}/api/channels/recall/webhook?bot=${encodeURIComponent(botRowId)}&token=${this.endpointToken(botRowId)}`;
+  }
+
+  /** Page the agent bot's browser opens. The token rides in the fragment so it never reaches server logs. */
+  botPageUrl(sessionId: string, sessionToken: string) {
+    return `${env.WEB_PUBLIC_URL.replace(/\/$/, '')}/bot/${encodeURIComponent(sessionId)}#t=${encodeURIComponent(sessionToken)}`;
   }
 
   private async recallFetch<T = any>(creds: RecallCreds, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
@@ -99,6 +132,7 @@ export class MeetingsService {
       sessionId: b.sessionId,
       lastError: b.lastError,
       botName: b.botName,
+      mode: b.mode as MeetingBotMode,
       evaluatedSpeakerName: b.evaluatedSpeakerName,
       lastEventAt: b.lastEventAt,
       createdAt: b.createdAt,
@@ -118,12 +152,23 @@ export class MeetingsService {
     return this.serialize(b);
   }
 
-  async create(workspaceId: string, principal: Principal, input: z.infer<typeof CreateMeetingBotBody>) {
+  /** A member's own practice bot (never someone else's). */
+  async getOwn(workspaceId: string, userId: string, id: string) {
+    const b = await this.prisma.meetingBot.findFirst({ where: { id, workspaceId, createdById: userId } });
+    if (!b) throw Errors.notFound('Meeting bot');
+    return this.serialize(b);
+  }
+
+  async create(workspaceId: string, principal: Principal, input: z.infer<typeof CreateMeetingBotBody>, participant?: MeetingParticipant) {
+    const mode: MeetingBotMode = input.mode ?? 'notetaker';
     const platform = meetingPlatform(input.meetingUrl);
     if (!platform) {
       throw Errors.validation('Enter a Zoom, Google Meet or Microsoft Teams meeting link (https://…)', [{ path: 'meetingUrl', message: 'Unsupported meeting URL' }]);
     }
     if (input.joinAt && input.joinAt.getTime() < Date.now() - 60_000) throw Errors.validation('joinAt must be in the future', [{ path: 'joinAt', message: 'In the past' }]);
+    if (mode === 'agent' && input.joinAt && input.joinAt.getTime() > Date.now() + AGENT_MAX_LEAD_MS) {
+      throw Errors.validation('An AI agent bot can be scheduled at most 20 hours ahead', [{ path: 'joinAt', message: 'Too far ahead' }]);
+    }
     const scenario = await this.prisma.scenario.findFirst({ where: { id: input.scenarioId, workspaceId, deletedAt: null } });
     if (!scenario) throw Errors.notFound('Scenario');
     if (!scenario.latestVersionId) throw Errors.conflict('Publish the scenario before sending a meeting bot');
@@ -133,7 +178,8 @@ export class MeetingsService {
 
     const creds = await this.providers.recall(workspaceId);
     const pub = this.providers.publicUrlStatus();
-    const blockedReason = !creds ? RECALL_MISSING : !pub.ok ? pub.reason : null;
+    const page = this.providers.botPageUrlStatus();
+    const blockedReason = !creds ? RECALL_MISSING : !pub.ok ? pub.reason : mode === 'agent' && !page.ok ? page.reason : null;
     const bot = await this.prisma.meetingBot.create({
       data: {
         workspaceId,
@@ -144,33 +190,47 @@ export class MeetingsService {
         calendarEventId: input.calendarEventId ?? null,
         status: blockedReason ? 'BLOCKED' : 'SCHEDULED',
         lastError: blockedReason,
-        botName: input.botName ?? (config.persona.name ? `${config.persona.name} (notetaker)` : 'ConversaForge notetaker'),
+        botName: input.botName ?? defaultBotName(mode, config.persona.name),
+        mode,
         evaluatedSpeakerName: input.evaluatedSpeakerName ?? null,
         createdById: userIdOf(principal),
       },
     });
-    await this.audit.log({ workspaceId, principal, action: 'channel.meeting_bot_created', targetType: 'meeting_bot', targetId: bot.id, metadata: { platform, blocked: !!blockedReason } });
+    await this.audit.log({ workspaceId, principal, action: 'channel.meeting_bot_created', targetType: 'meeting_bot', targetId: bot.id, metadata: { platform, mode, blocked: !!blockedReason } });
     if (blockedReason) return this.serialize(bot);
 
-    const { session } = await this.sessions.createSession({
-      workspaceId,
-      scenarioId: scenario.id,
-      channel: 'MEETING',
-      participant: { externalId: `meeting:${bot.id}`, name: input.evaluatedSpeakerName ?? 'Meeting participants' },
-      consent: { recordAudio: false, recordVideo: false, analysis: config.analysis.enabled, source: 'meeting_bot' },
-      metadata: { meeting: { botId: bot.id, platform, url: input.meetingUrl, evaluatedSpeakerName: input.evaluatedSpeakerName ?? null } },
-    });
+    let created: Awaited<ReturnType<SessionsService['createSession']>>;
     try {
-      const res = await this.recallFetch<{ id: string }>(creds!, 'POST', '/bot/', {
-        meeting_url: input.meetingUrl,
-        bot_name: bot.botName,
-        ...(input.joinAt ? { join_at: input.joinAt.toISOString() } : {}),
-        recording_config: {
-          transcript: { provider: { recallai_streaming: { mode: 'prioritize_low_latency', language_code: config.basics.language.slice(0, 2).toLowerCase() } } },
-          realtime_endpoints: [{ type: 'webhook', url: this.realtimeEndpointUrl(bot.id), events: ['transcript.data'] }],
-        },
-        metadata: { conversaforge_bot_id: bot.id, conversaforge_session_id: session.id, workspace_id: workspaceId },
+      created = await this.sessions.createSession({
+        workspaceId,
+        scenarioId: scenario.id,
+        channel: 'MEETING',
+        participant: participant ?? { externalId: `meeting:${bot.id}`, name: input.evaluatedSpeakerName ?? 'Meeting participants' },
+        consent: { recordAudio: false, recordVideo: false, analysis: config.analysis.enabled, source: 'meeting_bot' },
+        metadata: { meeting: { botId: bot.id, platform, url: input.meetingUrl, mode, evaluatedSpeakerName: input.evaluatedSpeakerName ?? null } },
+        // Agent bots run the call in the bot page (a browser), so live voice is available.
+        mediaInBrowser: mode === 'agent',
       });
+    } catch (e: any) {
+      await this.prisma.meetingBot.update({ where: { id: bot.id }, data: { status: 'FAILED', lastError: String(e?.message ?? e).slice(0, 500) } });
+      throw e;
+    }
+    const { session, sessionToken } = created;
+    try {
+      const res = await this.recallFetch<{ id: string }>(
+        creds!,
+        'POST',
+        '/bot/',
+        recallBotRequest({
+          mode,
+          meetingUrl: input.meetingUrl,
+          botName: bot.botName ?? defaultBotName(mode, config.persona.name),
+          joinAt: input.joinAt,
+          language: config.basics.language,
+          ...(mode === 'agent' ? { botPageUrl: this.botPageUrl(session.id, sessionToken) } : { realtimeEndpointUrl: this.realtimeEndpointUrl(bot.id) }),
+          metadata: { conversaforge_bot_id: bot.id, conversaforge_session_id: session.id, workspace_id: workspaceId },
+        }),
+      );
       const updated = await this.prisma.meetingBot.update({
         where: { id: bot.id },
         data: { providerBotId: res.id, sessionId: session.id, status: input.joinAt && input.joinAt.getTime() > Date.now() + 60_000 ? 'SCHEDULED' : 'JOINING' },
@@ -179,7 +239,8 @@ export class MeetingsService {
       await this.schedulePoll(bot.id, input.joinAt ? Math.max(POLL_INTERVAL_MS, input.joinAt.getTime() - Date.now()) : POLL_INTERVAL_MS);
       return this.serialize(updated);
     } catch (e: any) {
-      await transitionMeetingSession(this.prisma, this.events, session.id, 'FAILED', 'meeting_bot_failed', { errorCode: 'provider_error', errorMessage: e?.message });
+      if (mode === 'agent') await this.failAgentSession(session.id, 'provider_error', String(e?.message ?? e));
+      else await transitionMeetingSession(this.prisma, this.events, session.id, 'FAILED', 'meeting_bot_failed', { errorCode: 'provider_error', errorMessage: e?.message });
       const failed = await this.prisma.meetingBot.update({ where: { id: bot.id }, data: { status: 'FAILED', sessionId: session.id, lastError: String(e?.message ?? e).slice(0, 500) } });
       return this.serialize(failed);
     }
@@ -199,7 +260,9 @@ export class MeetingsService {
       }
     }
     const updated = await this.prisma.meetingBot.update({ where: { id: bot.id }, data: { status: 'CANCELLED' } });
-    if (bot.sessionId) {
+    if (bot.sessionId && bot.mode === 'agent') {
+      await this.closeAgentSession(bot.sessionId, 'meeting_bot_cancelled');
+    } else if (bot.sessionId) {
       const s = await this.prisma.session.findUnique({ where: { id: bot.sessionId } });
       if (s && !isTerminal(s.state as SessionState)) {
         await transitionMeetingSession(this.prisma, this.events, s.id, s.startedAt ? 'COMPLETED' : 'CANCELLED', 'meeting_bot_cancelled', { endedBy: 'admin' });
@@ -207,6 +270,43 @@ export class MeetingsService {
     }
     await this.audit.log({ workspaceId, principal, action: 'channel.meeting_bot_cancelled', targetType: 'meeting_bot', targetId: bot.id });
     return this.serialize(updated);
+  }
+
+  // ───────────────────────── agent sessions ─────────────────────────
+
+  /** The meeting is over (or the bot was cancelled): end the live session like a participant hanging up. */
+  private async closeAgentSession(sessionId: string, reason: string) {
+    try {
+      const engine = await this.runtime.getEngine(sessionId);
+      if (!engine.isTerminal) await engine.closeSession(reason, 'participant');
+    } catch (e: any) {
+      this.logger.warn(`Could not close agent session ${sessionId}: ${e?.message}`);
+    }
+  }
+
+  private async failAgentSession(sessionId: string, code: string, message: string) {
+    try {
+      const engine = await this.runtime.getEngine(sessionId);
+      await engine.fail(code, message.slice(0, 500));
+    } catch (e: any) {
+      this.logger.warn(`Could not fail agent session ${sessionId}: ${e?.message}`);
+    }
+  }
+
+  /** An agent session ended (agent closed it, time limit, …): take the bot out of the meeting. */
+  async leaveAfterSession(sessionId: string) {
+    const bot = await this.prisma.meetingBot.findFirst({ where: { sessionId, mode: 'agent', status: { in: ['SCHEDULED', 'JOINING', 'IN_CALL'] } } });
+    if (!bot) return;
+    const creds = await this.providers.recall(bot.workspaceId);
+    if (creds && bot.providerBotId) {
+      try {
+        if (bot.status === 'SCHEDULED') await this.recallFetch(creds, 'DELETE', `/bot/${encodeURIComponent(bot.providerBotId)}/`);
+        else await this.recallFetch(creds, 'POST', `/bot/${encodeURIComponent(bot.providerBotId)}/leave_call/`);
+      } catch (e: any) {
+        this.logger.warn(`Recall leave for ${bot.id} failed: ${e?.message}`);
+      }
+    }
+    await this.prisma.meetingBot.updateMany({ where: { id: bot.id, status: { in: ['SCHEDULED', 'JOINING', 'IN_CALL'] } }, data: { status: 'COMPLETED' } });
   }
 
   // ───────────────────────── webhooks & polling ─────────────────────────
@@ -245,6 +345,8 @@ export class MeetingsService {
   }
 
   async ingestUtterance(bot: MeetingBot, payload: any) {
+    // Agent sessions get their transcript from the live session itself.
+    if (bot.mode === 'agent') return;
     if (!bot.sessionId || (TERMINAL_BOT.has(bot.status) && bot.status !== 'COMPLETED')) return;
     const u = utteranceFromTranscriptEvent(payload);
     if (!u) return;
@@ -296,6 +398,12 @@ export class MeetingsService {
     if (!bot.sessionId) return;
     const s = await this.prisma.session.findUnique({ where: { id: bot.sessionId } });
     if (!s || isTerminal(s.state as SessionState)) return;
+    if (bot.mode === 'agent') {
+      // The bot page drives the session (it starts it once someone speaks); we only react to the end.
+      if (mapped === 'COMPLETED') await this.closeAgentSession(s.id, `recall_${code}`);
+      else if (mapped === 'FAILED') await this.failAgentSession(s.id, 'meeting_bot_failed', `Recall.ai bot ${code}${subCode ? ` (${subCode})` : ''}`);
+      return;
+    }
     if (mapped === 'IN_CALL') await transitionMeetingSession(this.prisma, this.events, s.id, 'ACTIVE', `recall_${code}`);
     else if (mapped === 'COMPLETED') {
       const turns = await this.prisma.transcriptTurn.count({ where: { sessionId: s.id } });
@@ -342,4 +450,10 @@ export class MeetingsService {
     const fresh = await this.prisma.meetingBot.findUnique({ where: { id: botId } });
     if (fresh && !TERMINAL_BOT.has(fresh.status)) await this.schedulePoll(botId);
   }
+}
+
+function defaultBotName(mode: MeetingBotMode, personaName: string | undefined) {
+  const name = personaName?.trim();
+  if (mode === 'agent') return name ? `${name} (AI)` : 'AI practice partner';
+  return name ? `${name} (notetaker)` : 'ConversaForge notetaker';
 }

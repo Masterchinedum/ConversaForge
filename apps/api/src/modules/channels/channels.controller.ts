@@ -2,8 +2,10 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Injectable, OnModuleIn
 import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { CurrentPrincipal, Public, RequireCapability } from '../../common/auth/decorators';
-import type { Principal } from '../../common/auth/principal';
+import { roleAtLeast } from '@cf/shared';
+import { CurrentPrincipal, CurrentUser, CurrentWorkspace, Public, RequireCapability } from '../../common/auth/decorators';
+import { verifiedEmail, type Principal, type WorkspaceContext } from '../../common/auth/principal';
+import { Errors } from '../../common/http/errors';
 import { PaginationQuery, prismaPageArgs, toPage } from '../../common/http/pagination';
 import { ZodPipe } from '../../common/http/zod.pipe';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -11,7 +13,7 @@ import { QUEUES, QueueService } from '../../common/queue/queue.service';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { BatchesService, CreateBatchBody, StartBatchBody, UploadTargetsBody } from './batches.service';
 import { ChannelProvidersService } from './channel-providers.service';
-import { CreateMeetingBotBody, MeetingsService } from './meetings.service';
+import { CreateMeetingBotBody, MeetingsService, PracticeMeetingBody } from './meetings.service';
 import { CreatePhoneNumberBody, PhoneNumbersService, UpdatePhoneNumberBody } from './phone-numbers.service';
 import { OutboundCallBody, PhoneService, type OutboundCallInput, type TwilioParams } from './phone.service';
 
@@ -148,6 +150,54 @@ export class ChannelsController {
   @HttpCode(200)
   cancelBot(@Param('workspaceId') ws: string, @Param('id') id: string, @CurrentPrincipal() p: Principal) {
     return this.meetings.cancel(ws, p, id);
+  }
+}
+
+/**
+ * Members practise a scenario in their own Zoom / Google Meet / Teams meeting: the scenario's AI persona
+ * joins as a meeting bot and talks (agent mode). Members only see and cancel their own bots.
+ */
+@ApiTags('channels')
+@Controller('workspaces/:workspaceId/scenarios/:scenarioId/meeting-bots')
+export class MeetingPracticeController {
+  constructor(
+    private readonly meetings: MeetingsService,
+    private readonly prisma: PrismaService,
+    private readonly rateLimit: RateLimitService,
+  ) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Send the AI persona into your meeting to practise this scenario' })
+  async create(
+    @Param('workspaceId') workspaceId: string,
+    @Param('scenarioId') scenarioId: string,
+    @Body(new ZodPipe(PracticeMeetingBody)) body: z.infer<typeof PracticeMeetingBody>,
+    @CurrentUser() user: Extract<Principal, { kind: 'user' }>,
+    @CurrentWorkspace() ws: WorkspaceContext,
+  ) {
+    // Every bot costs meeting-provider minutes: keep it well below the browser self-run limit.
+    await this.rateLimit.enforce(`meetbot:user:${user.userId}`, 10, 3600, 'You are sending meeting bots too quickly');
+    const scenario = await this.prisma.scenario.findFirst({ where: { id: scenarioId, workspaceId, deletedAt: null } });
+    if (!scenario) throw Errors.notFound('Scenario');
+    if (scenario.privacy === 'PRIVATE' && !roleAtLeast(ws.role, 'CREATOR')) throw Errors.notFound('Scenario');
+    return this.meetings.create(
+      workspaceId,
+      user,
+      { scenarioId, meetingUrl: body.meetingUrl, joinAt: body.joinAt, mode: 'agent' },
+      { userId: user.userId, email: verifiedEmail(user), name: user.name },
+    );
+  }
+
+  @Get(':id')
+  get(@Param('workspaceId') workspaceId: string, @Param('id') id: string, @CurrentUser() user: Extract<Principal, { kind: 'user' }>) {
+    return this.meetings.getOwn(workspaceId, user.userId, id);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  async cancel(@Param('workspaceId') workspaceId: string, @Param('id') id: string, @CurrentUser() user: Extract<Principal, { kind: 'user' }>) {
+    await this.meetings.getOwn(workspaceId, user.userId, id);
+    return this.meetings.cancel(workspaceId, user, id);
   }
 }
 

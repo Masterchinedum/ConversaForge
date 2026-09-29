@@ -4,7 +4,7 @@ import { decodeMulaw, EnergyVad, encodeMulaw, linearToMulaw, mulawToLinear, pcmT
 import { parseTwilioCredential } from './channel-providers.service';
 import { CsvError, parseCsv, parseTargetsCsv } from './csv';
 import { pathTo } from './meeting-session';
-import { mapRecallStatus, meetingPlatform, utteranceFromTranscriptEvent, verifySvixSignature } from './recall/recall';
+import { mapRecallStatus, meetingPlatform, recallBotRequest, utteranceFromTranscriptEvent, verifySvixSignature } from './recall/recall';
 import { PhoneBridge, splitSentences } from './twilio/phone-bridge';
 import { computeTwilioSignature, urlPortVariants, validateTwilioSignature } from './twilio/twilio-signature';
 import { normalizePhone, sayAndHangup, twiml, xmlEscape } from './twilio/twiml';
@@ -316,6 +316,28 @@ describe('Recall.ai helpers', () => {
     });
     expect(u).toEqual({ botId: 'bot_1', text: 'Hello team', speaker: { id: '7', name: 'Dana', isHost: true }, startMs: 1500, endMs: 2400 });
     expect(utteranceFromTranscriptEvent({ data: { data: { words: [] } } })).toBeNull();
+  });
+
+  it('builds create-bot requests: notetaker streams transcripts, agent opens the bot page via output media', () => {
+    const common = { meetingUrl: 'https://meet.google.com/abc-defg-hij', botName: 'Alex (AI)', language: 'en-US', metadata: { conversaforge_bot_id: 'b1' } };
+    const note = recallBotRequest({ ...common, mode: 'notetaker', realtimeEndpointUrl: 'https://api.example.com/hook' }) as any;
+    expect(note.recording_config.realtime_endpoints[0]).toMatchObject({ type: 'webhook', url: 'https://api.example.com/hook', events: ['transcript.data'] });
+    expect(note.recording_config.transcript.provider.recallai_streaming.language_code).toBe('en');
+    expect(note.output_media).toBeUndefined();
+
+    const joinAt = new Date('2026-10-01T10:00:00Z');
+    const agent = recallBotRequest({ ...common, mode: 'agent', joinAt, botPageUrl: 'https://app.example.com/bot/s1#t=cfs_x' }) as any;
+    expect(agent).toMatchObject({
+      meeting_url: common.meetingUrl,
+      bot_name: 'Alex (AI)',
+      join_at: '2026-10-01T10:00:00.000Z',
+      output_media: { camera: { kind: 'webpage', config: { url: 'https://app.example.com/bot/s1#t=cfs_x' } } },
+      variant: { zoom: 'web_4_core', google_meet: 'web_4_core', microsoft_teams: 'web_4_core' },
+      metadata: { conversaforge_bot_id: 'b1' },
+    });
+    // The live session produces the transcript: no paid Recall transcription for agents.
+    expect(agent.recording_config).toBeUndefined();
+    expect(() => recallBotRequest({ ...common, mode: 'agent' })).toThrow(/botPageUrl/);
   });
 
   it('meeting sessions follow legal state-machine paths', () => {

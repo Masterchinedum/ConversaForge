@@ -27,7 +27,12 @@ export class ProviderResolverService {
   async resolve(
     workspaceId: string,
     config: ScenarioConfig,
-    opts: { channel: Channel; workspaceSettings?: Record<string, unknown> },
+    opts: {
+      channel: Channel;
+      workspaceSettings?: Record<string, unknown>;
+      /** Audio runs in a browser page even on a MEETING channel (the Recall output-media bot page). */
+      mediaInBrowser?: boolean;
+    },
   ): Promise<ProviderInfo> {
     let llm: ResolvedLlm;
     try {
@@ -50,7 +55,7 @@ export class ProviderResolverService {
     const googleSecret = await this.llm.providerSecret(workspaceId, 'google', 'REALTIME');
     const deepgram = !!(await this.llm.providerSecret(workspaceId, 'deepgram'));
     const elevenlabs = !!(await this.llm.providerSecret(workspaceId, 'elevenlabs'));
-    const isPhone = opts.channel === 'PHONE_INBOUND' || opts.channel === 'PHONE_OUTBOUND' || opts.channel === 'MEETING';
+    const isPhone = opts.channel === 'PHONE_INBOUND' || opts.channel === 'PHONE_OUTBOUND' || (opts.channel === 'MEETING' && !opts.mediaInBrowser);
 
     let voiceMode = config.model.voiceMode;
     const requestedLive: RealtimeProviderChoice = config.model.realtimeProvider ?? 'auto';
@@ -58,7 +63,7 @@ export class ProviderResolverService {
     if (voiceMode === 'realtime') {
       if (isPhone) {
         voiceMode = 'pipeline';
-        fallbacks.push('Live speech-to-speech voice runs in the browser only; phone/meeting channels use the speech pipeline.');
+        fallbacks.push('Live speech-to-speech voice runs in the browser only; phone calls and meeting notetakers use the speech pipeline.');
       } else {
         const pick = pickLiveProvider(requestedLive, { openai: openaiSecret, google: googleSecret });
         if (!pick.provider) {

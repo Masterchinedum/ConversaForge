@@ -61,6 +61,52 @@ export function meetingPlatform(raw: string): 'zoom' | 'google_meet' | 'microsof
   return null;
 }
 
+export const MEETING_BOT_MODES = ['notetaker', 'agent'] as const;
+export type MeetingBotMode = (typeof MEETING_BOT_MODES)[number];
+
+/**
+ * Create-bot request body.
+ * - notetaker: real-time transcript utterances are pushed to our webhook; nobody speaks.
+ * - agent: Recall "output media" — the bot's browser opens our bot page, whose audio becomes the bot's
+ *   microphone and whose rendering becomes its camera; the page hears the meeting via getUserMedia and
+ *   runs the normal live session. The web variant (4 cores) keeps live audio smooth on every platform.
+ */
+export function recallBotRequest(o: {
+  mode: MeetingBotMode;
+  meetingUrl: string;
+  botName: string;
+  joinAt?: Date | null;
+  language: string;
+  /** notetaker: our per-bot realtime webhook URL. */
+  realtimeEndpointUrl?: string;
+  /** agent: the bot page URL (carries the session token in the fragment). */
+  botPageUrl?: string;
+  metadata: Record<string, string>;
+}): Record<string, unknown> {
+  const base = {
+    meeting_url: o.meetingUrl,
+    bot_name: o.botName,
+    ...(o.joinAt ? { join_at: o.joinAt.toISOString() } : {}),
+    metadata: o.metadata,
+  };
+  if (o.mode === 'agent') {
+    if (!o.botPageUrl) throw new Error('botPageUrl is required for agent bots');
+    return {
+      ...base,
+      output_media: { camera: { kind: 'webpage', config: { url: o.botPageUrl } } },
+      variant: { zoom: 'web_4_core', google_meet: 'web_4_core', microsoft_teams: 'web_4_core' },
+    };
+  }
+  if (!o.realtimeEndpointUrl) throw new Error('realtimeEndpointUrl is required for notetaker bots');
+  return {
+    ...base,
+    recording_config: {
+      transcript: { provider: { recallai_streaming: { mode: 'prioritize_low_latency', language_code: o.language.slice(0, 2).toLowerCase() } } },
+      realtime_endpoints: [{ type: 'webhook', url: o.realtimeEndpointUrl, events: ['transcript.data'] }],
+    },
+  };
+}
+
 /** Recall bot status codes → MeetingBot.status. */
 export function mapRecallStatus(code: string): 'JOINING' | 'IN_CALL' | 'COMPLETED' | 'FAILED' | null {
   switch (code) {

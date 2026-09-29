@@ -70,15 +70,7 @@ export class ChannelProvidersService {
 
   /** Twilio must reach our webhooks and media stream over public HTTPS/WSS. */
   publicUrlStatus() {
-    let url: URL | null = null;
-    try {
-      url = new URL(env.API_PUBLIC_URL);
-    } catch {
-      /* invalid */
-    }
-    const host = url?.hostname ?? '';
-    const local = !url || ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host) || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host);
-    const ok = !!url && url.protocol === 'https:' && !local;
+    const ok = isPublicHttps(env.API_PUBLIC_URL);
     return {
       apiPublicUrl: env.API_PUBLIC_URL,
       ok,
@@ -86,9 +78,20 @@ export class ChannelProvidersService {
     };
   }
 
+  /** Meeting agent bots: Recall's bot browser loads our web app's bot page, so the web app must be public too. */
+  botPageUrlStatus() {
+    const ok = isPublicHttps(env.WEB_PUBLIC_URL);
+    return {
+      webPublicUrl: env.WEB_PUBLIC_URL,
+      ok,
+      reason: ok ? null : 'WEB_PUBLIC_URL must be a public https:// URL: the meeting bot opens the agent page from the web app.',
+    };
+  }
+
   async availability(workspaceId: string) {
     const [tw, rc, speech] = await Promise.all([this.twilio(workspaceId), this.recall(workspaceId), this.speech(workspaceId)]);
     const publicUrl = this.publicUrlStatus();
+    const botPage = this.botPageUrlStatus();
     return {
       twilio: { configured: !!tw, source: tw?.source ?? null, reason: tw ? null : TWILIO_MISSING },
       recall: {
@@ -102,6 +105,8 @@ export class ChannelProvidersService {
       publicUrl,
       phoneReady: !!tw && speech.ready && publicUrl.ok,
       meetingsReady: !!rc && publicUrl.ok,
+      botPage,
+      meetingAgentsReady: !!rc && publicUrl.ok && botPage.ok,
     };
   }
 
@@ -153,4 +158,16 @@ export async function twilioRequest<T = any>(
     throw new AppError(502, 'provider_error', msg, { status: res.status, twilioCode: json?.code ?? null });
   }
   return json as T;
+}
+
+function isPublicHttps(raw: string): boolean {
+  let url: URL | null = null;
+  try {
+    url = new URL(raw);
+  } catch {
+    /* invalid */
+  }
+  const host = url?.hostname ?? '';
+  const local = !url || ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host) || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(host);
+  return !!url && url.protocol === 'https:' && !local;
 }

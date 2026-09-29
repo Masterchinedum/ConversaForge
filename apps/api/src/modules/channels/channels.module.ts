@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { RuntimeModule } from '../runtime/runtime.module';
 import { BatchesService } from './batches.service';
 import { ChannelProvidersService } from './channel-providers.service';
-import { ChannelsController, ChannelsJobs, ChannelWebhooksController } from './channels.controller';
+import { ChannelsController, ChannelsJobs, ChannelWebhooksController, MeetingPracticeController } from './channels.controller';
 import { MeetingsService } from './meetings.service';
 import { PhoneNumbersService } from './phone-numbers.service';
 import { PhoneService } from './phone.service';
@@ -15,7 +15,7 @@ import { TwilioMediaGateway } from './twilio/twilio-media.gateway';
  */
 @Module({
   imports: [RuntimeModule],
-  controllers: [ChannelsController, ChannelWebhooksController],
+  controllers: [ChannelsController, ChannelWebhooksController, MeetingPracticeController],
   providers: [ChannelProvidersService, PhoneNumbersService, PhoneService, BatchesService, MeetingsService, TwilioMediaGateway, ChannelsJobs],
   exports: [ChannelProvidersService, PhoneService],
 })
