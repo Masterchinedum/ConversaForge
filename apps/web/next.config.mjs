@@ -63,6 +63,9 @@ const nextConfig = {
     // breaks uploads (knowledge documents up to 25 MB, course assets up to 200 MB). The API enforces
     // the real per-endpoint limits.
     middlewareClientMaxBodySize: '210mb',
+    // The rewrite proxy gives up after 30 s by default and answers 500. Drafting a whole scenario with a
+    // real model (Scenario Studio assistant) regularly takes longer, so allow up to 3 minutes.
+    proxyTimeout: 180_000,
   },
   // No server-side image optimization (avoids the native sharp/libvips dependency).
   images: { unoptimized: true },

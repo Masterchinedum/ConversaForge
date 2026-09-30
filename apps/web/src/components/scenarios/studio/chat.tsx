@@ -93,18 +93,35 @@ export function StudioChat({
     setSending(msg);
     setSendError(null);
     setText('');
+    const startedAt = Date.now();
+    let id: string | null = null;
     try {
       // The assistant reads the saved draft: save pending edits first (this also creates a new draft).
       if (!(await draft.flush())) throw new Error('Your latest edits could not be saved, so the assistant cannot see them yet. Resolve the save problem above and try again.');
-      const id = await draft.ensureCreated();
+      id = await draft.ensureCreated();
       await api<Proposal>(wsPath(`/scenarios/${id}/assistant`), { method: 'POST', body: { instruction: msg } });
       await refresh();
     } catch (e) {
-      setSendError(errorMessage(e));
-      setText((t) => t || msg);
+      // A proxy or network timeout can drop the response while the assistant still finishes: if the
+      // reply to this message was stored, show it instead of an error.
+      const recovered = id ? await recoverReply(msg, startedAt) : false;
+      if (!recovered) {
+        setSendError(errorMessage(e));
+        setText((t) => t || msg);
+      }
     } finally {
       setSending(null);
     }
+  };
+
+  /** Look for a stored reply to `msg` made after `since` (polls briefly, the model may still be writing). */
+  const recoverReply = async (msg: string, since: number) => {
+    for (let i = 0; i < 12; i++) {
+      const data = (await refresh().catch(() => null)) as { data?: Proposal[] } | null | undefined;
+      if (data?.data?.some((p) => p.instruction === msg && new Date(p.createdAt).getTime() >= since - 5000)) return true;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    return false;
   };
 
   const apply = async (p: Proposal, paths: string[]) => {
@@ -266,7 +283,7 @@ export function StudioChat({
             <UserBubble text={sending} />
             <AssistantBubble>
               <p className="flex items-center gap-2 text-sm text-slate-600" role="status">
-                <Spinner /> Working on your scenario…
+                <Spinner /> Working on your scenario… A full draft from an AI model can take a minute or two.
               </p>
             </AssistantBubble>
           </div>

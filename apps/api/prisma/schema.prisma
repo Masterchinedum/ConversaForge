@@ -387,7 +387,7 @@ model DraftAssistantProposal {
   instruction   String
   // [{ path, before, after, reason }]
   changes       Json
-  status        String    @default("PENDING") // PENDING | APPLIED | PARTIAL | REJECTED | STALE
+  status        String    @default("PENDING") // PENDING | APPLIED | PARTIAL | REJECTED | STALE | NO_CHANGES | RUNNING | DONE | FAILED | CANCELLED | UNDONE
   appliedPaths  String[]
   provider      String?
   model         String? // model id used (e.g. "claude-opus-5"; "local-simulator")
@@ -401,6 +401,13 @@ model DraftAssistantProposal {
   questions     String[]  @default([])
   unsupported   Json      @default("[]")
   preserved     Json      @default("[]")
+  // Studio agent runs: "review" = a proposal the creator applies; "standard" | "flash" | "deep" = an
+  // agent run that edits the draft step by step (status RUNNING → DONE | FAILED | CANCELLED | UNDONE).
+  mode            String    @default("review")
+  // [{ at, kind: narration|tool|update|check|error, text, paths? }] — progress shown in the Studio
+  events          Json      @default("[]")
+  cancelRequested Boolean   @default(false)
+  finishedAt      DateTime?
   createdById   String?
   createdAt     DateTime  @default(now())
   resolvedAt    DateTime?
