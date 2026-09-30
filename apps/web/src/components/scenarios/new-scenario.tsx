@@ -3,6 +3,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { SCENARIO_TEMPLATES, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type ScenarioType } from '@cf/shared';
 import { api, errorMessage } from '@/lib/api';
+import { markOwnTestSession } from '@/lib/voice/audio-mode';
 import { Alert, Button, Field, Input, Modal, Select, Tabs, Textarea, clsx } from '@/components/ui';
 import type { ScenarioDetail } from './types';
 
@@ -135,6 +136,7 @@ export async function startSelfRun(wsPath: (p: string) => string, scenarioId: st
   try {
     sessionStorage.setItem(`cf:session:${r.sessionId}`, r.sessionToken);
     localStorage.setItem(`cf:session:${r.sessionId}`, r.sessionToken);
+    markOwnTestSession(r.sessionId);
   } catch {
     /* storage unavailable */
   }

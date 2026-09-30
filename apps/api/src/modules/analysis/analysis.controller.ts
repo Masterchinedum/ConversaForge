@@ -6,6 +6,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { ApiScopes, CurrentPrincipal, CurrentUser, CurrentWorkspace, Public, RequireCapability } from '../../common/auth/decorators';
 import type { Principal, WorkspaceContext } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { ZodPipe } from '../../common/http/zod.pipe';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { SessionsService } from '../runtime/sessions.service';
@@ -34,6 +35,7 @@ export class SessionReviewController {
     private readonly exports: ExportService,
     private readonly audit: AuditService,
     private readonly rateLimit: RateLimitService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get()
@@ -162,6 +164,23 @@ export class SessionReviewController {
       .send(out.body);
   }
 
+  @Get(':sessionId/transcript.txt')
+  @RequireCapability('exports.download')
+  @ApiScopes('analysis:read')
+  async transcriptText(
+    @CurrentWorkspace() ws: WorkspaceContext,
+    @CurrentPrincipal() principal: Principal,
+    @Param('sessionId') sessionId: string,
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+  ) {
+    const session = await this.prisma.session.findFirst({ where: { id: sid(sessionId), workspaceId: ws.workspaceId, deletedAt: null } });
+    if (!session) throw Errors.notFound('Session');
+    const out = await this.exports.transcriptText(session);
+    await this.audit.log({ workspaceId: ws.workspaceId, principal, action: 'session.exported', targetType: 'session', targetId: sessionId, metadata: { format: 'txt' }, ip: req.ip });
+    sendText(reply, out);
+  }
+
   @Get(':sessionId/export.csv')
   @RequireCapability('exports.download')
   @ApiScopes('analysis:read')
@@ -191,6 +210,7 @@ export class ParticipantReportController {
     private readonly reports: ParticipantReportService,
     private readonly sessions: SessionsService,
     private readonly rateLimit: RateLimitService,
+    private readonly exports: ExportService,
   ) {}
 
   @Public()
@@ -226,4 +246,31 @@ export class ParticipantReportController {
   myReport(@CurrentUser() user: Extract<Principal, { kind: 'user' }>, @Param('sessionId') sessionId: string) {
     return this.reports.forUser(user.userId, sid(sessionId));
   }
+
+  @Public()
+  @Get('runtime/sessions/:sessionId/transcript.txt')
+  async transcriptByToken(@Param('sessionId') sessionId: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply) {
+    await this.rateLimit.enforce(`report:ip:${req.ip}`, 120, 60);
+    const auth = req.headers.authorization ?? '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) throw Errors.unauthorized('Session token required');
+    const session = await this.sessions.verifySessionToken(sid(sessionId), token);
+    await this.reports.assertTranscriptVisible(session);
+    sendText(reply, await this.exports.transcriptText(session));
+  }
+
+  @Get('me/sessions/:sessionId/transcript.txt')
+  async myTranscript(@CurrentUser() user: Extract<Principal, { kind: 'user' }>, @Param('sessionId') sessionId: string, @Res() reply: FastifyReply) {
+    const session = await this.reports.ownSession(user.userId, sid(sessionId));
+    await this.reports.assertTranscriptVisible(session);
+    sendText(reply, await this.exports.transcriptText(session));
+  }
+}
+
+function sendText(reply: FastifyReply, out: { fileName: string; body: string }) {
+  reply
+    .header('Content-Type', 'text/plain; charset=utf-8')
+    .header('Content-Disposition', contentDisposition(out.fileName))
+    .header('Cache-Control', 'no-store')
+    .send(out.body);
 }

@@ -162,6 +162,58 @@ Tunables: `PREBUFFER_S`/`REBUFFER_S`/`MAX_CUSHION_S`/`MAX_HOLD_MS` (`audio-playe
 `PREROLL_CHUNKS`, `INPUT_SETTLE_MS`, `TAIL_CUT_MS` (`gemini-live.ts`), `agentWarmupMs`/`echoRatio`/`bargeInMs`
 (`vad.ts`).
 
+### Double questions, no thinking time, Spanish transcripts (2026-09-30)
+A real "Behavioral interview" run (Gemini Live): almost every agent reply came twice, reworded
+("Nice to meet you… could you tell me about a disagreement?" → "Thanks for sharing that. Could you tell me
+about a disagreement?"), often landing while the participant had started answering, which felt like
+constant interrupting. Parts of the participant's English came back as Spanish.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every reply followed by a second, reworded one | The prompt asks for `update_progress` after the spoken text in every reply. As a (default) blocking Gemini function, the model waits for the result and then **generates again**; OpenAI's adapter likewise sent `response.create` after every tool result. Reproduced against the real `gemini-3.8-live` with no participant input: 3 turns re-asking the same question in 20 s | Server marks `update_progress` results `silent: true` (`realtime.tool_result`, additive). Gemini: `update_progress` is declared `behavior: NON_BLOCKING` in the locked token setup and answered with `scheduling: SILENT` (context only). OpenAI: no `response.create` when every result in the batch is silent. Real API after the change (direct key and locked ephemeral token): 1 turn, then quiet |
+| Agent answers as soon as the participant pauses | Gemini's activity detection is silence-only (no semantic "unfinished sentence" check like OpenAI's semantic VAD); the default 1200 ms end-of-turn silence is short for thinking | `silenceDurationMs = endOfTurnSilenceMs + GEMINI_THINKING_PAD_MS` (800 ms, capped at 3000) → 2 s by default |
+| English transcribed as Spanish | `inputAudioTranscription: {}` = per-utterance language auto-detection | `inputAudioTranscription.languageCodes = [basics.language]` (SDK 2.24 `AudioTranscriptionConfig.languageCodes`, accepted by the constrained endpoint) |
+
+### Plain audio experiment (`?audio=plain`, 2026-09-30)
+Question behind it: is our browser turn-taking layer (echo gate, local VAD deciding what Gemini hears,
+ducking, tail cut, `START_SENSITIVITY_LOW`) helping, or fighting Gemini's own activity detection? Plain audio
+is Google's reference setup: the mic streams continuously with the browser's echo cancellation only, and
+Gemini alone decides turns and barge-in (`interrupted`).
+
+- Switch: "Audio handling" (Managed / Plain) on the device-check screen, shown only for Gemini Live on
+  sessions this browser started with ▶ Try it (`cf:selftest:<id>`, set by `startSelfRun`) or when plain is
+  already on — participants' links never see it. `?audio=plain|managed` on the live page still works. The
+  choice is remembered in that browser (`localStorage['cf.liveAudioMode']`); the call screen shows
+  "Google Gemini Live (plain audio)". Code: `apps/web/src/lib/voice/audio-mode.ts`, `GeminiLiveAdapter.plain`.
+  (The first URL-only version was never actually used in the user's tests: every token event said
+  `plainAudio: false`.)
+- Token: `POST …/realtime-token { plainAudio: true }` → no `startOfSpeechSensitivity` (Google's default);
+  end-of-turn settings unchanged. Logged on the `provider.realtime_token` session event (`plainAudio`).
+- Kept in both modes: the playback jitter buffer (audio quality, not turn-taking), holding client-content
+  instructions while the model is busy (client content interrupts generation — protocol behaviour), silent
+  `update_progress`, transcription language.
+- What to compare (headphones, then laptop speakers): does the agent cut itself off or answer its own voice
+  (echo), does it stop promptly when you talk over it, does it wait through thinking pauses. If plain holds
+  up on speakers, the managed layer (`mic-gate.ts`, gating in `gemini-live.ts`) can be deleted.
+- Tests: `live-providers.spec.ts` + `runtime.e2e.spec.ts` (token setup), `e2e/gemini-live.spec.ts` "plain audio"
+  (mic keeps streaming while the agent plays; `interrupted` stops playback; the choice persists). and "device
+  check: the audio switch…" (hidden on a participant link; Plain on your own call reaches the token request).
+
+### Silence check-in in live voice (2026-09-30)
+Before: the check-in existed only in the pipeline (`!this.realtime` in `tick()`), and the live models never
+speak unprompted — a silent participant got no reaction until the wrap-up near the time limit. Now:
+- The browser sends `participant.speaking` in live mode too (the server's `participantBusy()` then also holds
+  realtime instructions while the participant talks).
+- Agent turns mirrored from the live model set `agentBusyUntil = now + estimateSpeechMs(text)` (playback
+  still running when the turn is reported), so silence is measured from about the end of the agent's audio.
+- After `turnTaking.silenceCheckInMs` (default 25 s) with the agent's turn last: one
+  `realtime.instruction { text: <silence_check_in trigger>, respond: true, cancelOnSpeech: true }` per
+  silence (logged `silence.check_in`); speech resets it.
+- `cancelOnSpeech` (additive protocol field): the Gemini adapter drops a queued check-in when the
+  participant speaks or is transcribed before the model is free to take it. OpenAI adds it immediately.
+- Tests: `runtime.e2e.spec.ts` "realtime mode: silence check-in…", `e2e/gemini-live.spec.ts` plain-audio test
+  (a queued check-in is dropped on speech; an unqueued one is sent with `turnComplete: true`).
+
 ## API facts verified (and where)
 All from `node_modules/@google/genai` **2.24.0** (`dist/genai.d.ts`, `dist/node/index.cjs`, `dist/web/index.mjs`)
 plus `raw.githubusercontent.com/googleapis/js-genai/main/…` and `…/python-genai/main/…`:

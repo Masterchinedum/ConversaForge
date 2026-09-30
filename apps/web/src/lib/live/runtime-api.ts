@@ -182,11 +182,12 @@ export interface GeminiLiveCredentials {
 export async function fetchGeminiToken(
   sessionId: string,
   token: string,
-  opts: { resumeHandle?: string; reconnect?: boolean } = {},
+  opts: { resumeHandle?: string; reconnect?: boolean; plainAudio?: boolean } = {},
 ): Promise<GeminiLiveCredentials> {
   const body: Record<string, unknown> = { provider: 'google' };
   if (opts.resumeHandle) body.resumeHandle = opts.resumeHandle;
   if (opts.reconnect) body.reconnect = true;
+  if (opts.plainAudio) body.plainAudio = true;
   const r: any = await api(`${base(sessionId)}/realtime-token`, { method: 'POST', token, body });
   const eph = pick<string>(r?.token, r?.name);
   if (r?.provider !== 'google' || !eph) throw new ApiError(502, 'realtime_unavailable', 'No Gemini Live credentials returned');

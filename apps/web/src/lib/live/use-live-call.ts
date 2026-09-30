@@ -10,6 +10,7 @@ import { wsUrl } from '../api';
 import {
   createVoiceClient,
   detectCapabilities,
+  liveAudioMode,
   planVoice,
   unavailableKeyFor,
   voiceLabel as labelFor,
@@ -114,6 +115,7 @@ export function useLiveCall(o: UseLiveCallOptions) {
           serverTts: plan.output === 'server',
           speakInTypedMode: plan.output !== 'none',
           sessionStartedAt: () => startedAtRef.current,
+          liveAudio: liveAudioMode(),
         },
         { agentSpeaksFirst },
       );
@@ -148,7 +150,8 @@ export function useLiveCall(o: UseLiveCallOptions) {
           setParticipantSpeaking(s);
           if (lastSpeaking.current === s) return;
           lastSpeaking.current = s;
-          if (vc.mode !== 'realtime') send({ type: 'participant.speaking', speaking: s });
+          // Also in live mode: the server holds instructions while the participant talks and times the silence check-in.
+          send({ type: 'participant.speaking', speaking: s });
         }),
         vc.on('playback', (turnId, event, spokenChars) => {
           if (vc.mode === 'realtime') return;
@@ -318,10 +321,10 @@ export function useLiveCall(o: UseLiveCallOptions) {
           spokenTurns.current.add(m.turn.id);
           break;
         case 'realtime.tool_result':
-          vc?.sendToolResult?.(m.callId, m.output);
+          vc?.sendToolResult?.(m.callId, m.output, m.silent);
           break;
         case 'realtime.instruction':
-          vc?.sendInstruction?.(m.text, m.respond);
+          vc?.sendInstruction?.(m.text, m.respond, { cancelOnSpeech: m.cancelOnSpeech });
           break;
         case 'end':
           lifecycle({ type: 'session.ended', data: { reason: m.reason, endedBy: m.endedBy } });

@@ -66,8 +66,8 @@ test('realtime adapter: WebRTC handshake + transcript/tool mirroring + tool resu
     server.onMessage((m) => {
       const d = JSON.parse(String(m));
       if (d.type === 'welcome') d.config = { ...d.config, voiceMode: 'realtime', realtime: { provider: 'openai', model: 'gpt-realtime' } };
-      // Keep the real session's own agent turns / opening instruction out of this protocol test.
-      if (['agent.start', 'agent.delta', 'agent.end', 'realtime.instruction'].includes(d.type)) return;
+      // Keep the real session's own agent turns / opening instruction / tool results out of this protocol test.
+      if (['agent.start', 'agent.delta', 'agent.end', 'realtime.instruction', 'realtime.tool_result'].includes(d.type)) return;
       ws.send(JSON.stringify(d));
     });
   });
@@ -113,6 +113,18 @@ test('realtime adapter: WebRTC handshake + transcript/tool mirroring + tool resu
   const received = await page.evaluate(() => (window as any).__fakeOpenAI.received);
   expect(received.find((e: any) => e.item?.type === 'function_call_output')).toMatchObject({ item: { call_id: 'call_1', output: '{"ok":true}' } });
   expect(received.find((e: any) => e.item?.role === 'system')?.item.content[0].text).toBe('Wrap up in one minute.');
+
+  // A silent result (update_progress after the spoken reply) goes into context without a new response.
+  const responseCreates = () => page.evaluate(() => (window as any).__fakeOpenAI.received.filter((e: any) => e.type === 'response.create').length);
+  const createsBefore = await responseCreates();
+  await fake({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'call_2', name: 'update_progress', arguments: '{"coveredTopicIds":[]}' } });
+  await expect.poll(() => sent.filter((m) => m.type === 'realtime.tool_call').length).toBe(2);
+  pageWs.send(JSON.stringify({ type: 'realtime.tool_result', callId: 'call_2', output: 'Progress recorded.', silent: true }));
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__fakeOpenAI.received.some((e: any) => e.item?.call_id === 'call_2')))
+    .toBe(true);
+  await page.waitForTimeout(300);
+  expect(await responseCreates()).toBe(createsBefore);
 
   // "I'm done answering" commits the input buffer.
   await page.getByRole('button', { name: /I’m done answering/ }).click();

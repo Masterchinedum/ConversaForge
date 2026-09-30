@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { api, errorMessage } from '@/lib/api';
+import { api, download, errorMessage } from '@/lib/api';
 import { Alert, Badge, Button, Field, Input, Modal } from '@/components/ui';
 
 export interface PracticeBot {
@@ -141,14 +141,25 @@ export function MeetingPracticeModal({
           )}
           {b.status === 'IN_CALL' && <p>{who} is in the meeting. Say hello to begin — the practice session starts when someone speaks.</p>}
           {b.status === 'COMPLETED' && (
-            <p>
-              The practice session is over.{' '}
+            <div className="space-y-2">
+              <p>
+                The practice session is over.{' '}
+                {b.sessionId && (
+                  <Link className="text-brand-700 hover:underline" href={`/report/${b.sessionId}`}>
+                    Open your feedback report
+                  </Link>
+                )}
+              </p>
               {b.sessionId && (
-                <Link className="text-brand-700 hover:underline" href={`/report/${b.sessionId}`}>
-                  Open your feedback report
-                </Link>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => download(`/me/sessions/${b.sessionId}/transcript.txt`, `transcript-${b.sessionId}.txt`).catch((e) => setError(errorMessage(e)))}
+                >
+                  Download transcript
+                </Button>
               )}
-            </p>
+            </div>
           )}
           {b.status === 'CANCELLED' && <p>{who} was removed from the meeting.</p>}
           {(b.status === 'FAILED' || b.status === 'BLOCKED') && (

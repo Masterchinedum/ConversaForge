@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import type { Session } from '@prisma/client';
 import { existsSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import { formatExtractionValue } from './format';
 import { ReviewService, type SessionListQuery } from './review.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { slugForFile, toCsv } from './csv';
+import { parseVersionConfig } from './pipeline.types';
+import { renderTranscriptText } from './transcript-text';
 
 type Detail = Awaited<ReturnType<ReviewService['detail']>>;
 
@@ -59,6 +62,42 @@ export class ExportService {
     ]);
     const body = toCsv(['seq', 'speaker', 'started_at_ms', 'ended_at_ms', 'offset', 'interrupted', 'source', 'text'], rows);
     return { fileName: `transcript-${slugForFile(d.scenario.name)}-${d.session.id}.csv`, body };
+  }
+
+  // ───────────────────────── Plain-text transcript ─────────────────────────
+
+  /** Readable transcript of one session (staff route and the participant's own download). */
+  async transcriptText(session: Session): Promise<{ fileName: string; body: string }> {
+    const [version, scenario, participant, turns] = await Promise.all([
+      this.prisma.scenarioVersion.findFirst({ where: { id: session.scenarioVersionId, workspaceId: session.workspaceId }, select: { config: true } }),
+      this.prisma.scenario.findFirst({ where: { id: session.scenarioId, workspaceId: session.workspaceId }, select: { name: true } }),
+      this.prisma.participant.findFirst({ where: { id: session.participantId, workspaceId: session.workspaceId }, select: { name: true } }),
+      this.prisma.transcriptTurn.findMany({
+        where: { sessionId: session.id, speaker: { in: ['AGENT', 'PARTICIPANT'] } },
+        orderBy: { seq: 'asc' },
+        select: { speaker: true, text: true, startedAtMs: true, metadata: true },
+      }),
+    ]);
+    const config = version ? parseVersionConfig(version.config) : null;
+    const scenarioName = config?.basics.name || scenario?.name || 'Session';
+    const meeting = ((session.metadata ?? {}) as { meeting?: { platform?: string; url?: string; mode?: string } }).meeting;
+    const body = renderTranscriptText({
+      scenarioName,
+      sessionId: session.id,
+      startedAt: session.startedAt,
+      createdAt: session.createdAt,
+      durationMs: session.durationMs,
+      agentName: config?.persona.name?.trim() || 'Agent',
+      participantName: participant?.name?.trim() || 'Participant',
+      meeting: session.channel === 'MEETING' && meeting ? { platform: meeting.platform ?? null, url: meeting.url ?? null, mode: meeting.mode ?? 'notetaker' } : null,
+      turns: turns.map((t) => ({
+        speaker: t.speaker,
+        text: t.text,
+        startedAtMs: t.startedAtMs,
+        speakerName: typeof (t.metadata as { speakerName?: unknown } | null)?.speakerName === 'string' ? ((t.metadata as { speakerName: string }).speakerName) : null,
+      })),
+    });
+    return { fileName: `transcript-${slugForFile(scenarioName)}-${session.id}.txt`, body };
   }
 
   /** Filtered session list with one column per rubric criterion and extraction key (current evaluations). */

@@ -19,15 +19,22 @@
  *      `realtime.transcript` (stable item ids, exactly once); `interrupted` → barge-in (playback stops, the
  *      agent turn is reported interrupted with an estimate of what was heard); `turnComplete` ends a turn.
  *   5. `toolCall.functionCalls` → `realtime.tool_call`; the server executes/authorizes the tool and returns
- *      `realtime.tool_result`, sent back with `sendToolResponse({ functionResponses })`.
+ *      `realtime.tool_result`, sent back with `sendToolResponse({ functionResponses })`. Silent results
+ *      (update_progress, declared NON_BLOCKING) are scheduled SILENT: a normal response would make the model
+ *      speak again after every reply, re-asking the question it just asked.
  *   6. `realtime.instruction` (opening line, nudges, wrap-up, closing) → a client-content text turn. Client
  *      content interrupts whatever the model is generating, so instructions wait until the model is idle:
  *      not generating or expected to, its audio finished playing, and the participant not mid-sentence.
  *   7. `sessionResumptionUpdate` handles + `goAway` → reconnect with a fresh token that resumes the session;
  *      without a handle, a fresh session whose instructions carry the transcript so far.
+ *
+ * Plain audio (`liveAudio: 'plain'`, experiment): step 3 without our turn-taking layer — every mic chunk is
+ * sent (the browser's echo canceller is the only echo defence), no gate, pre-roll, ducking or tail cut, and
+ * the token keeps Gemini's default start-of-speech sensitivity. Barge-in is whatever Gemini reports as
+ * `interrupted`. The local VAD only drives the level meter and "speaking" indicator.
  */
 
-import type { LiveServerMessage, Session } from '@google/genai';
+import type { FunctionResponseScheduling, LiveServerMessage, Session } from '@google/genai';
 import { fetchGeminiToken, type GeminiLiveCredentials } from '../live/runtime-api';
 import { AudioPlayer, base64ToBytes } from './audio-player';
 import { MicGate } from './mic-gate';
@@ -54,6 +61,8 @@ const RESPONSE_WAIT_MS = 8000;
 const BUSY_RECHECK_MS = 250;
 /** Sustained participant speech over the tail of an agent turn cuts the playback after this. */
 const TAIL_CUT_MS = 1200;
+/** `FunctionResponseScheduling.SILENT` without loading the SDK up front (it is imported lazily on connect). */
+const SILENT = 'SILENT' as FunctionResponseScheduling.SILENT;
 const INSTRUCTION_PREFIX = '[Session runtime instruction — not said by the participant. Follow it; never read it aloud.]';
 
 export function hasGeminiLiveSupport(): boolean {
@@ -231,7 +240,7 @@ interface AgentItem extends Item {
 
 export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClient {
   readonly mode = 'realtime' as const;
-  readonly label = 'Google Gemini Live';
+  readonly label: string;
   readonly listens = true;
   readonly speaks = true;
 
@@ -256,12 +265,12 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   /** We asked the model for a response (client content / tool results): hold instructions until it starts. */
   private awaitingResponseUntil = 0;
   private lastInputAt = 0;
-  private instructions: Array<{ text: string; respond: boolean }> = [];
+  private instructions: Array<{ text: string; respond: boolean; cancelOnSpeech?: boolean }> = [];
   private instructionTimer: ReturnType<typeof setTimeout> | null = null;
   private tailCutTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingCalls = new Map<string, string>();
   private seenCalls = new Set<string>();
-  private responses: Array<{ id?: string; name: string; response: Record<string, unknown> }> = [];
+  private responses: Array<{ id?: string; name: string; response: Record<string, unknown>; scheduling?: FunctionResponseScheduling }> = [];
   private responseTimer: ReturnType<typeof setTimeout> | null = null;
   private resumeHandle: string | null = null;
   private reconnecting = false;
@@ -272,10 +281,14 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   private streamEnded = false;
   private agentAudible = false;
   private stopped = false;
+  /** Plain audio experiment: no echo gate / local turn-taking; Gemini decides (see the header). */
+  private readonly plain: boolean;
 
   constructor(private o: VoiceClientOptions) {
     super();
     this.ptt = o.turnTaking.mode === 'push_to_talk';
+    this.plain = o.liveAudio === 'plain';
+    this.label = this.plain ? 'Google Gemini Live (plain audio)' : 'Google Gemini Live';
   }
 
   async start(): Promise<void> {
@@ -290,7 +303,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     }
     let creds: GeminiLiveCredentials;
     try {
-      creds = await fetchGeminiToken(this.o.sessionId, this.o.token);
+      creds = await fetchGeminiToken(this.o.sessionId, this.o.token, { plainAudio: this.plain });
     } catch (e: any) {
       this.emit('error', {
         code: 'provider_unavailable',
@@ -309,6 +322,9 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
       throw e;
     }
     if (this.stopped) return; // stopped while connecting: nothing else to set up
+    if (this.plain && this.o.micStream!.getAudioTracks()[0]!.getSettings?.().echoCancellation === false) {
+      console.warn('[gemini-live] plain audio without echo cancellation: through speakers the agent will hear itself');
+    }
     this.mic = new MicStreamer(ctx, this.o.micStream!, (b64) => this.sendAudio(b64));
     await this.mic.start();
     this.vad = new EnergyVad(ctx, this.o.micStream!, {
@@ -401,7 +417,10 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     this.emit('notice', 'Reconnecting live voice…');
     for (let attempt = 1; attempt <= MAX_RECONNECTS && !this.stopped; attempt++) {
       try {
-        const creds = await fetchGeminiToken(this.o.sessionId, this.o.token, this.resumeHandle ? { resumeHandle: this.resumeHandle } : { reconnect: true });
+        const creds = await fetchGeminiToken(this.o.sessionId, this.o.token, {
+          ...(this.resumeHandle ? { resumeHandle: this.resumeHandle } : { reconnect: true }),
+          plainAudio: this.plain,
+        });
         await this.open(creds);
         this.reconnecting = false;
         return;
@@ -456,6 +475,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   /** Low-latency caption while the participant is still talking (never stored: the final chunks replace it). */
   private onInterimInput(text: string) {
     this.lastInputAt = Date.now();
+    this.dropStaleInstructions();
     if (!this.user) this.user = { id: this.newId('u'), text: '' };
     const shown = cleanTranscript(`${this.user.text} ${text}`);
     if (shown) this.emit('partial', shown, this.user.id);
@@ -463,6 +483,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
 
   private onInputText(text: string, finished: boolean) {
     this.lastInputAt = Date.now();
+    this.dropStaleInstructions();
     if (!this.user) this.user = { id: this.newId('u'), text: '' };
     const u = this.user;
     u.text += text;
@@ -586,13 +607,20 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   }
 
   /** Server result for a relayed call. Responses for one tool-call batch are sent together. */
-  sendToolResult(callId: string, output: string): void {
+  sendToolResult(callId: string, output: string, silent?: boolean): void {
     const name = this.pendingCalls.get(callId);
     if (!name) return;
     this.pendingCalls.delete(callId);
-    this.responses.push({ ...(callId.startsWith('gcall_') ? {} : { id: callId }), name, response: { output } });
-    if (this.pendingCalls.size === 0) this.flushToolResponses();
-    else if (!this.responseTimer) this.responseTimer = setTimeout(() => this.flushToolResponses(), 8000);
+    this.responses.push({
+      ...(callId.startsWith('gcall_') ? {} : { id: callId }),
+      name,
+      response: { output },
+      ...(silent ? { scheduling: SILENT } : {}),
+    });
+    if (this.pendingCalls.size === 0) {
+      this.flushToolResponses();
+      this.flushInstructions(); // instructions wait while calls are pending
+    } else if (!this.responseTimer) this.responseTimer = setTimeout(() => this.flushToolResponses(), 8000);
   }
 
   private flushToolResponses() {
@@ -603,7 +631,10 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     this.responses = [];
     try {
       this.session.sendToolResponse({ functionResponses });
-      this.awaitingResponseUntil = Date.now() + RESPONSE_WAIT_MS; // the model continues its turn
+      // The model continues its turn — unless every result was silent (context only).
+      if (functionResponses.some((r) => r.scheduling !== SILENT)) {
+        this.awaitingResponseUntil = Date.now() + RESPONSE_WAIT_MS;
+      }
     } catch (e) {
       console.warn('[gemini-live] tool response failed', e);
     }
@@ -612,9 +643,14 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   // ───────────────────────────── instructions & text ─────────────────────────────
 
   /** Server instruction (opening line, nudge, wrap-up, closing) as a clearly framed client text turn. */
-  sendInstruction(text: string, respond?: boolean): void {
-    this.instructions.push({ text, respond: !!respond });
+  sendInstruction(text: string, respond?: boolean, opts?: { cancelOnSpeech?: boolean }): void {
+    this.instructions.push({ text, respond: !!respond, ...(opts?.cancelOnSpeech ? { cancelOnSpeech: true } : {}) });
     this.flushInstructions();
+  }
+
+  /** The participant spoke: a queued silence check-in is stale. */
+  private dropStaleInstructions() {
+    if (this.instructions.some((i) => i.cancelOnSpeech)) this.instructions = this.instructions.filter((i) => !i.cancelOnSpeech);
   }
 
   /**
@@ -671,6 +707,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
 
   private sendAudio(b64: string) {
     if (!this.session || !this.ready || !this.listening()) return;
+    if (this.plain) return this.transmit(b64);
     for (const chunk of this.gate.offer(b64)) this.transmit(chunk);
   }
 
@@ -707,6 +744,12 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     this.userSpeaking = speaking;
     this.gate.userSpeaking = speaking;
     this.emit('speaking', speaking);
+    if (speaking) this.dropStaleInstructions();
+    if (this.plain) {
+      // Gemini hears everything and handles barge-in itself; locally we only hold instructions meanwhile.
+      if (!speaking) this.flushInstructions();
+      return;
+    }
     if (speaking) {
       if (duringAgent || this.gate.agentAudible) this.openGate('speech');
       return;
@@ -863,6 +906,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   debugState() {
     return {
       ready: this.ready,
+      plainAudio: this.plain,
       generating: this.generating,
       agentAudible: this.agentAudible,
       playing: this.player?.isPlaying() ?? false,

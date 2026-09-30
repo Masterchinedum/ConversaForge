@@ -67,8 +67,9 @@ export function errorMessage(e: unknown): string {
 }
 
 /** Trigger a browser download for an authenticated API endpoint (CSV/PDF exports). */
-export async function download(path: string, fallbackName: string, query?: ApiOptions['query']) {
-  const res = await fetch(buildUrl(path, query), { credentials: 'include' });
+/** Download a file; `token` sends a participant session token (`cfs_…`) instead of relying on the cookie. */
+export async function download(path: string, fallbackName: string, query?: ApiOptions['query'], token?: string) {
+  const res = await fetch(buildUrl(path, query), { credentials: 'include', headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? 'Download failed');

@@ -722,9 +722,12 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       c.send({ type: 'realtime.transcript', itemId: 'item_u1', role: 'user', text: 'Yes, ready.' }); // duplicate
       c.send({ type: 'realtime.tool_call', callId: 'call_1', name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
       const tr = await c.next('realtime.tool_result');
-      expect(tr).toEqual({ type: 'realtime.tool_result', callId: 'call_1', output: 'Progress recorded.' });
+      // Progress bookkeeping is silent: the adapter must not ask the model for another reply.
+      expect(tr).toEqual({ type: 'realtime.tool_result', callId: 'call_1', output: 'Progress recorded.', silent: true });
       c.send({ type: 'realtime.tool_call', callId: 'call_2', name: 'slides', arguments: '{}' });
-      expect((await c.next('realtime.tool_result')).output).toMatch(/not available/);
+      const denied = await c.next('realtime.tool_result');
+      expect(denied.output).toMatch(/not available/);
+      expect(denied.silent).toBeUndefined();
       // SECURITY: a scripted client cannot fire server-side tools at WebSocket speed (per-session cap).
       for (let i = 3; i <= 22; i++) c.send({ type: 'realtime.tool_call', callId: `call_${i}`, name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
       await c.next('realtime.tool_result', (m) => m.callId === 'call_22' && /too many tool calls/.test(m.output), 10_000);
@@ -750,6 +753,50 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       server.close();
     }
   });
+  it('realtime mode: silence check-in asks the live model once per silence, never while the participant talks', async () => {
+    const fx = await createWorkspaceFixture(prisma as any);
+    await prisma.providerConnection.create({
+      data: { workspaceId: fx.workspace.id, provider: 'openai', kind: 'REALTIME', encryptedSecret: app.get(CryptoService).encrypt('sk-openai-test') },
+    });
+    const cfg = interviewConfig(
+      { model: { voiceMode: 'realtime', llmProvider: 'openai', llmModel: '', temperature: 0.7, sttProvider: 'browser', ttsProvider: 'browser', realtimeProvider: 'openai', realtimeModel: '' } },
+      { turnTaking: { silenceCheckInMs: 1500 } },
+    );
+    const { scenario } = await publishScenario(prisma as any, fx.workspace.id, cfg);
+    const created = (await (
+      await fetch(`${base}/api/workspaces/${fx.workspace.id}/scenarios/${scenario.id}/sessions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${fx.cookieToken}`, 'content-type': 'application/json' },
+        body: '{}',
+      })
+    ).json()) as any;
+    const s = { sessionId: created.sessionId, sessionToken: created.sessionToken };
+    await consent(s);
+    const { c, welcome } = await connect(s);
+    expect(welcome.config.voiceMode).toBe('realtime');
+    c.send({ type: 'start' });
+    await c.next('realtime.instruction'); // opening line
+    c.send({ type: 'realtime.transcript', itemId: 'a1', role: 'assistant', text: 'Ready?' });
+    const isCheckIn = (m: any) => m.type === 'realtime.instruction' && /silent for about/.test(m.text);
+
+    // Silence after the agent's question → one check-in the live model must answer; stale once they talk.
+    const check = await c.next('realtime.instruction', isCheckIn, 8000);
+    expect(check).toMatchObject({ respond: true, cancelOnSpeech: true });
+    expect(check.text).toMatch(/take your time|repeat or rephrase|more time/i);
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(c.messages.filter(isCheckIn)).toHaveLength(1);
+
+    // Talking (even without a transcript yet) holds the next one; it comes only after a new silence.
+    c.send({ type: 'participant.speaking', speaking: true });
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(c.messages.filter(isCheckIn)).toHaveLength(1);
+    c.send({ type: 'participant.speaking', speaking: false });
+    await c.next('realtime.instruction', (m) => isCheckIn(m) && m !== check, 8000);
+    expect(c.messages.filter(isCheckIn)).toHaveLength(2);
+    expect(await prisma.sessionEvent.count({ where: { sessionId: s.sessionId, type: 'silence.check_in' } })).toBe(2);
+    c.close();
+  });
+
   it('realtime mode (Google Gemini Live, auto): ephemeral token minted server-side with the locked setup; transcripts/tools mirrored identically', async () => {
     const bodies: any[] = [];
     const server: Server = createServer((req, res) => {
@@ -796,7 +843,7 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       expect(setup.systemInstruction.parts[0].text).toContain('<behavior_policy>');
       expect(setup.systemInstruction.parts[0].text).toContain('<conversation_state>');
       expect(setup.tools[0].functionDeclarations.map((t: any) => t.name)).toEqual(expect.arrayContaining(['update_progress', 'end_session']));
-      expect(setup.inputAudioTranscription).toEqual({});
+      expect(setup.inputAudioTranscription).toEqual({ languageCodes: ['en-US'] });
       expect(setup.outputAudioTranscription).toEqual({});
       expect(JSON.stringify(tok)).not.toContain('AIza-google-test-key');
       expect(JSON.stringify(tok)).not.toContain('behavior_policy');
@@ -811,7 +858,7 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       c.send({ type: 'realtime.transcript', itemId: 'g_c1_2_u', role: 'user', text: 'Yes, ready.' });
       c.send({ type: 'realtime.transcript', itemId: 'g_c1_2_u', role: 'user', text: 'Yes, ready.' }); // duplicate
       c.send({ type: 'realtime.tool_call', callId: 'function-call-1', name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
-      expect(await c.next('realtime.tool_result')).toEqual({ type: 'realtime.tool_result', callId: 'function-call-1', output: 'Progress recorded.' });
+      expect(await c.next('realtime.tool_result')).toEqual({ type: 'realtime.tool_result', callId: 'function-call-1', output: 'Progress recorded.', silent: true });
       // Same per-session tool-call cap as the OpenAI path.
       for (let i = 2; i <= 21; i++) c.send({ type: 'realtime.tool_call', callId: `fc_${i}`, name: 'update_progress', arguments: '{"coveredTopicIds":[],"currentTopicId":"background"}' });
       await c.next('realtime.tool_result', (m) => m.callId === 'fc_21' && /too many tool calls/.test(m.output), 10_000);
@@ -837,10 +884,14 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       expect(resumedPrompt).toContain('<conversation_so_far');
       expect(resumedPrompt).toContain('participant: Yes, ready.');
       expect(bodies[2].body.bidiGenerateContentSetup.sessionResumption).toEqual({});
+      expect(bodies[2].body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBe('START_SENSITIVITY_LOW');
+      // Plain-audio experiment: Google's default start sensitivity (the browser does not gate the mic).
+      await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ reconnect: true, plainAudio: true }), headers: { 'content-type': 'application/json' } })).json();
+      expect(bodies[3].body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBeUndefined();
       // Malformed handles are rejected before reaching Google.
       const bad = await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ resumeHandle: 'has spaces' }), headers: { 'content-type': 'application/json' } });
       expect(bad.status).toBe(422);
-      expect(bodies).toHaveLength(3);
+      expect(bodies).toHaveLength(4);
 
       c.send({ type: 'control', action: 'end' });
       await c.next('state', (m) => m.state === 'ENDING');

@@ -37,6 +37,8 @@ export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements Voice
   private currentAgentItem: string | null = null;
   private agentAudible = false;
   private pendingCalls = new Set<string>();
+  /** Something waiting on the pending tool calls wants a response (a non-silent result, an instruction, typed text). */
+  private respondAfterCalls = false;
   private seenCalls = new Set<string>();
   private ptt: boolean;
   private stopped = false;
@@ -236,10 +238,16 @@ export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements Voice
     this.emit('realtimeToolCall', { callId, name, arguments: args ?? '{}' });
   }
 
-  sendToolResult(callId: string, output: string) {
+  sendToolResult(callId: string, output: string, silent?: boolean) {
     this.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: callId, output } });
     this.pendingCalls.delete(callId);
-    if (this.pendingCalls.size === 0) this.send({ type: 'response.create' });
+    // A silent result (update_progress after the spoken reply) only goes into context: asking for a
+    // response here would make the agent talk again, re-asking the question it just asked.
+    if (!silent) this.respondAfterCalls = true;
+    if (this.pendingCalls.size === 0 && this.respondAfterCalls) {
+      this.respondAfterCalls = false;
+      this.send({ type: 'response.create' });
+    }
   }
 
   /** Server-side instruction (timed nudge / wrap-up / closing) injected as a system message. */
@@ -248,7 +256,9 @@ export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements Voice
       type: 'conversation.item.create',
       item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
     });
-    if (respond && this.pendingCalls.size === 0) this.send({ type: 'response.create' });
+    if (!respond) return;
+    if (this.pendingCalls.size === 0) this.send({ type: 'response.create' });
+    else this.respondAfterCalls = true;
   }
 
   /** Typed participant input in realtime mode: added as a user message, then a response is requested. */
@@ -256,6 +266,7 @@ export class OpenAIRealtimeAdapter extends Emitter<VoiceEvents> implements Voice
     if (this.agentAudible) this.cancelSpeech('local');
     this.send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
     if (this.pendingCalls.size === 0) this.send({ type: 'response.create' });
+    else this.respondAfterCalls = true;
   }
 
   private setAgentAudible(a: boolean) {

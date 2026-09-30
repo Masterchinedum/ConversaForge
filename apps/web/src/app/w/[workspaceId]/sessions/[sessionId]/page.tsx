@@ -64,10 +64,11 @@ export default function SessionDetailPage() {
   const d = data;
   const simulated = !!d.evaluation?.simulated || d.extraction.some((x) => x.simulated) || !!d.session.providerInfo?.simulated;
 
-  const exportFile = async (kind: 'pdf' | 'csv') => {
+  const exportFile = async (kind: 'pdf' | 'csv' | 'txt') => {
     setExporting(kind);
     try {
-      await download(wsPath(`/sessions/${d.session.id}/export.${kind}`), `session-${d.session.id}.${kind}`);
+      const path = kind === 'txt' ? `/sessions/${d.session.id}/transcript.txt` : `/sessions/${d.session.id}/export.${kind}`;
+      await download(wsPath(path), `session-${d.session.id}.${kind}`);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -125,6 +126,9 @@ export default function SessionDetailPage() {
               <>
                 <Button variant="secondary" size="sm" loading={exporting === 'pdf'} onClick={() => exportFile('pdf')}>
                   Export PDF
+                </Button>
+                <Button variant="secondary" size="sm" loading={exporting === 'txt'} onClick={() => exportFile('txt')}>
+                  Download transcript
                 </Button>
                 <Button variant="secondary" size="sm" loading={exporting === 'csv'} onClick={() => exportFile('csv')}>
                   Transcript CSV

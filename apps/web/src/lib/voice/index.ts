@@ -13,6 +13,7 @@ import { TypedAdapter } from './typed';
 import { VOICE_MODE_LABELS, type VoiceClient, type VoiceClientOptions, type VoiceMode } from './types';
 
 export * from './types';
+export { isOwnTestSession, liveAudioMode, markOwnTestSession, setLiveAudioMode, type LiveAudioMode } from './audio-mode';
 
 export interface BrowserCapabilities {
   secureContext: boolean;

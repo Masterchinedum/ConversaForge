@@ -14,7 +14,16 @@ import {
 } from '@/lib/live/devices';
 import type { LiveBootstrap } from '@/lib/live/runtime-api';
 import type { CallDevices } from '@/lib/live/use-live-call';
-import { detectCapabilities, planVoice, voiceLabel, type BrowserCapabilities } from '@/lib/voice';
+import {
+  detectCapabilities,
+  isOwnTestSession,
+  liveAudioMode,
+  planVoice,
+  setLiveAudioMode,
+  voiceLabel,
+  type BrowserCapabilities,
+  type LiveAudioMode,
+} from '@/lib/voice';
 import { hasSpeechSynthesis, pickVoice } from '@/lib/voice/synth';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { MicMeter, useStreamLevel } from './MicMeter';
@@ -47,6 +56,8 @@ export function DeviceCheck({
   const [testing, setTesting] = useState(false);
   const [heard, setHeard] = useState<boolean | null>(null);
   const [caps, setCaps] = useState<BrowserCapabilities | null>(null);
+  /** Gemini Live audio experiment: offered on your own test calls (or once plain is on, to switch back). */
+  const [audioMode, setAudioMode] = useState<{ mode: LiveAudioMode; offer: boolean }>({ mode: 'managed', offer: false });
   const handedOff = useRef(false);
   const micRef = useRef<MediaStream | null>(null);
   const camRef = useRef<MediaStream | null>(null);
@@ -56,6 +67,14 @@ export function DeviceCheck({
   const ids = { mic: useId(), cam: useId(), spk: useId() };
 
   useEffect(() => setCaps(detectCapabilities()), []);
+  useEffect(() => {
+    const mode = liveAudioMode();
+    setAudioMode({ mode, offer: mode === 'plain' || isOwnTestSession(boot.sessionId) });
+  }, [boot.sessionId]);
+  const chooseAudioMode = (mode: LiveAudioMode) => {
+    setLiveAudioMode(mode);
+    setAudioMode((a) => ({ ...a, mode }));
+  };
   useEffect(() => {
     micRef.current = mic;
     camRef.current = cam;
@@ -356,6 +375,23 @@ export function DeviceCheck({
                 </p>
               )}
               {plan.reason && <p className="mt-1 text-slate-600">{plan.reason}</p>}
+              {plan.mode === 'realtime' && plan.realtimeProvider === 'google' && audioMode.offer && (
+                <fieldset className="mt-2 space-y-1" data-testid="live-audio-mode">
+                  <legend className="text-xs font-medium text-slate-700">Audio handling (test calls only)</legend>
+                  <label className="flex items-start gap-2 text-xs text-slate-700">
+                    <input type="radio" name="live-audio-mode" className="mt-0.5" checked={audioMode.mode === 'managed'} onChange={() => chooseAudioMode('managed')} />
+                    <span>
+                      <span className="font-medium">Managed</span> — our echo gate and local turn-taking
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs text-slate-700">
+                    <input type="radio" name="live-audio-mode" className="mt-0.5" checked={audioMode.mode === 'plain'} onChange={() => chooseAudioMode('plain')} />
+                    <span>
+                      <span className="font-medium">Plain</span> — Gemini alone decides turns and interruptions (Google&apos;s reference setup)
+                    </span>
+                  </label>
+                </fieldset>
+              )}
               <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
                 <Cap ok={caps.speechRecognition} label="Speech recognition" />
                 <Cap ok={caps.speechSynthesis} label="Speech synthesis" />

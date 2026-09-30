@@ -536,6 +536,16 @@ d('Developer platform, webhooks & channels (integration)', () => {
     // Late utterances after completion are ignored.
     await inject({ method: 'POST', url, headers: json, payload: utter('Dana', 'late', 99) });
     expect(await prisma.transcriptTurn.count({ where: { sessionId: bot.sessionId } })).toBe(2);
+
+    // Readable transcript download with the meeting's display names.
+    const txt = await inject({ method: 'GET', url: `/api/workspaces/${wsA}/sessions/${bot.sessionId}/transcript.txt`, headers: auth(userToken) });
+    expect(txt.statusCode).toBe(200);
+    expect(txt.headers['content-type']).toMatch(/text\/plain/);
+    expect(txt.headers['content-disposition']).toMatch(/attachment; filename="transcript-.*\.txt"/);
+    expect(txt.body).toContain('Meeting: Zoom (notetaker) — https://us02web.zoom.us/j/1234567890');
+    expect(txt.body).toContain('[0:01] Dana: Thanks for joining, what is your budget?');
+    expect(txt.body).toContain('[0:04] Lee: Around fifty thousand.');
+    expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/sessions/${bot.sessionId}/transcript.txt`, headers: auth(otherToken) })).statusCode).toBe(404);
   });
   it('meeting agent bots (Recall output media, faked HTTP): member sends the persona → bot page session → meeting end / session end', async () => {
     const { MeetingsService } = await import('../channels/meetings.service.js');
@@ -618,6 +628,35 @@ d('Developer platform, webhooks & channels (integration)', () => {
     await waitFor(async () => (await prisma.meetingBot.findUnique({ where: { id: second.id } })).status === 'COMPLETED');
     expect((await prisma.meetingBot.findUnique({ where: { id: second.id } })).status).toBe('COMPLETED');
     expect(calls.some((c) => c.url.endsWith('/bot/bot_agent_2/leave_call/') && c.init.method === 'POST')).toBe(true);
+
+    // The member downloads their own meeting transcript (logged in, or with the session token);
+    // it follows the scenario's participantCanSeeTranscript setting.
+    const mine = await inject({ method: 'GET', url: `/api/me/sessions/${bot.sessionId}/transcript.txt`, headers: auth(userToken) });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.body).toContain('Meeting: Google Meet (AI agent)');
+    expect((await inject({ method: 'GET', url: `/api/runtime/sessions/${bot.sessionId}/transcript.txt`, headers: auth(pageToken) })).statusCode).toBe(200);
+    expect((await inject({ method: 'GET', url: `/api/me/sessions/${bot.sessionId}/transcript.txt`, headers: auth(otherToken) })).statusCode).toBe(404);
+    // Versions are immutable: publish one that hides transcripts, send a bot on it, then restore.
+    const setTranscriptVisible = async (visible: boolean) => {
+      const draft = await inject({ method: 'GET', url: `/api/v1/scenarios/${scenarioId}`, headers: auth(fullKey) });
+      const patch = await inject({
+        method: 'PATCH',
+        url: `/api/v1/scenarios/${scenarioId}/draft`,
+        headers: { ...json, ...auth(fullKey) },
+        payload: { revision: draft.json().draft.revision, patch: [{ path: 'analysis.participantCanSeeTranscript', value: visible }] },
+      });
+      expect(patch.statusCode).toBe(200);
+      expect((await inject({ method: 'POST', url: `/api/v1/scenarios/${scenarioId}/publish`, headers: { ...json, ...auth(fullKey) }, payload: {} })).statusCode).toBe(200);
+    };
+    await setTranscriptVisible(false);
+    try {
+      const hidden = (await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })).json();
+      expect((await inject({ method: 'GET', url: `/api/me/sessions/${hidden.sessionId}/transcript.txt`, headers: auth(userToken) })).statusCode).toBe(403);
+      // Staff exports are not affected by the participant setting.
+      expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/sessions/${hidden.sessionId}/transcript.txt`, headers: auth(userToken) })).statusCode).toBe(200);
+    } finally {
+      await setTranscriptVisible(true);
+    }
 
     // Cancelling from the practice dialog removes the bot and closes its session.
     const third = (await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })).json();

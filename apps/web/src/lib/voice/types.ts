@@ -4,6 +4,8 @@
  * over WebRTC, Google Gemini Live over WebSocket), or typing.
  */
 
+import type { LiveAudioMode } from './audio-mode';
+
 export type VoiceMode = 'browser' | 'server' | 'realtime' | 'typed';
 
 export const VOICE_MODE_LABELS: Record<VoiceMode, string> = {
@@ -94,10 +96,10 @@ export interface VoiceClient {
   setTalking(held: boolean): void;
   /** Receive server-streamed agent audio (pipeline TTS over the WebSocket). */
   handleServerAudio?(msg: { turnId: string; seq: number; mime: string; data: string; final?: boolean }): void;
-  /** Realtime adapter: return a tool result to the model. */
-  sendToolResult?(callId: string, output: string): void;
+  /** Realtime adapter: return a tool result to the model (`silent`: context only, no new response). */
+  sendToolResult?(callId: string, output: string, silent?: boolean): void;
   /** Realtime adapter: inject a server instruction (system message) and optionally request a response. */
-  sendInstruction?(text: string, respond?: boolean): void;
+  sendInstruction?(text: string, respond?: boolean, opts?: { cancelOnSpeech?: boolean }): void;
   /** Realtime adapter: a typed participant message the live model should hear and answer. */
   sendUserText?(text: string): void;
   on<E extends keyof VoiceEvents>(event: E, fn: VoiceEvents[E]): () => void;
@@ -152,4 +154,6 @@ export interface VoiceClientOptions {
   speakInTypedMode?: boolean;
   /** Session start epoch (ms) for relative utterance timestamps. */
   sessionStartedAt: () => number;
+  /** Gemini Live: 'plain' streams the mic ungated and leaves turn-taking to Gemini (see audio-mode.ts). */
+  liveAudio?: LiveAudioMode;
 }

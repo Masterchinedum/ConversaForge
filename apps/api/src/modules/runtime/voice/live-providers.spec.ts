@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { defaultScenarioConfig, type ScenarioConfig } from '@cf/shared';
 import { ProviderResolverService, liveModel, pickLiveProvider } from './provider-resolver.service';
-import { GEMINI_TOKEN, RealtimeService, geminiVoice } from './realtime.service';
+import { GEMINI_THINKING_PAD_MS, GEMINI_TOKEN, RealtimeService, geminiVoice } from './realtime.service';
 
 /**
  * Live speech-to-speech providers (unit): Gemini Live ephemeral-token minting against a local mock of the
@@ -80,14 +80,18 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(setup.systemInstruction.parts[0].text).toContain('<conversation_state>');
     expect(setup.tools[0].functionDeclarations.map((f: any) => f.name)).toEqual(['update_progress', 'end_session', 'fn_lookup_order']);
     expect(setup.tools[0].functionDeclarations[1].parametersJsonSchema.required).toEqual(['reason']);
+    // Progress bookkeeping is non-blocking (answered SILENT by the browser): as a blocking call the model
+    // generated again after every result and re-asked its question. Other tools stay blocking.
+    expect(setup.tools[0].functionDeclarations.map((f: any) => f.behavior)).toEqual(['NON_BLOCKING', undefined, undefined]);
     expect(setup.generationConfig.responseModalities).toEqual(['AUDIO']);
     // gemini-3.8-live is not a native-audio model name, so the scenario language is sent too.
     expect(setup.generationConfig.speechConfig).toEqual({ voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, languageCode: config.basics.language });
-    expect(setup.inputAudioTranscription).toEqual({});
+    // The transcriber is told the scenario language (auto-detection turned accented English into Spanish).
+    expect(setup.inputAudioTranscription).toEqual({ languageCodes: [config.basics.language] });
     expect(setup.outputAudioTranscription).toEqual({});
     expect(setup.realtimeInputConfig).toMatchObject({
       activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW', endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 },
+      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW', endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 + GEMINI_THINKING_PAD_MS },
     });
     expect(setup.sessionResumption).toEqual({});
     expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });
@@ -99,7 +103,7 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
       apiVersion: 'v1alpha',
       voice: 'Kore',
       resumed: false,
-      connectConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {}, sessionResumption: {} },
+      connectConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: { languageCodes: ['en-US'] }, outputAudioTranscription: {}, sessionResumption: {} },
       audio: { inputMimeType: 'audio/pcm;rate=16000', outputSampleRate: 24000 },
     });
     // SECURITY: neither the real key nor the prompt/tools reach the browser.
@@ -121,6 +125,14 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(setup.generationConfig.speechConfig).toEqual({ voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } }, languageCode: 'en-US' });
     expect(setup.tools).toBeUndefined();
     expect(creds).toMatchObject({ resumed: true, connectConfig: { sessionResumption: { handle: 'handle-XYZ' } } });
+  });
+
+  it('plain audio keeps Google\'s default start-of-speech sensitivity (the browser does not gate the mic)', async () => {
+    const svc = new RealtimeService(fakeLlm({ google: { secret: 'k' } }));
+    await svc.mint({ workspaceId: 'ws', provider: 'google', model: '', instructions: 'I', tools: [], config: cfg(), plainAudio: true });
+    const aad = requests[0]!.body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection;
+    expect(aad.startOfSpeechSensitivity).toBeUndefined();
+    expect(aad).toMatchObject({ endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 + GEMINI_THINKING_PAD_MS });
   });
 
   it('503 when no Google credential (or the connection has live voice unchecked)', async () => {

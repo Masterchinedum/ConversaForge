@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import { Alert, Badge, Card, Loading, SimulatedBadge, Spinner } from '@/components/ui';
 import { OverallScore, ScoreBar, mmss } from '@/components/review/score';
 import type { ParticipantReport } from '@/components/review/types';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, download, errorMessage } from '@/lib/api';
 import { formatDate, formatDuration } from '@/lib/format';
 import { readSessionToken } from '@/lib/live/token';
 
@@ -26,6 +26,19 @@ async function loadReport(sessionId: string, token: string | null): Promise<Part
   return api<ParticipantReport>(`/me/sessions/${encodeURIComponent(sessionId)}/report`);
 }
 
+/** Same auth order as the report: the session token first, then the logged-in participant. */
+async function downloadTranscript(sessionId: string, token: string | null) {
+  const name = `transcript-${sessionId}.txt`;
+  if (token) {
+    try {
+      return await download(`/runtime/sessions/${encodeURIComponent(sessionId)}/transcript.txt`, name, undefined, token);
+    } catch (e) {
+      if (!(e instanceof ApiError) || (e.status !== 401 && e.status !== 404)) throw e;
+    }
+  }
+  return download(`/me/sessions/${encodeURIComponent(sessionId)}/transcript.txt`, name);
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <Card title={title}>{children}</Card>;
 }
@@ -33,6 +46,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function ParticipantReportPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [token, setToken] = useState<string | null | undefined>(undefined);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(false);
 
   useEffect(() => setToken(readSessionToken(sessionId)), [sessionId]);
@@ -145,11 +159,23 @@ export default function ParticipantReportPage() {
           <Card
             title={`Transcript (${r.transcript.length} turns)`}
             actions={
-              <button className="text-sm text-brand-700 hover:underline" aria-expanded={showTranscript} onClick={() => setShowTranscript((v) => !v)}>
-                {showTranscript ? 'Hide' : 'Show'}
-              </button>
+              <span className="flex items-center gap-4">
+                {r.transcript.length > 0 && (
+                  <button className="text-sm text-brand-700 hover:underline" onClick={() => downloadTranscript(sessionId, token ?? null).catch((e) => setDownloadError(errorMessage(e)))}>
+                    Download
+                  </button>
+                )}
+                <button className="text-sm text-brand-700 hover:underline" aria-expanded={showTranscript} onClick={() => setShowTranscript((v) => !v)}>
+                  {showTranscript ? 'Hide' : 'Show'}
+                </button>
+              </span>
             }
           >
+            {downloadError && (
+              <div className="mb-3">
+                <Alert tone="error">{downloadError}</Alert>
+              </div>
+            )}
             {showTranscript ? (
               <ol className="space-y-2">
                 {r.transcript.map((t) => (

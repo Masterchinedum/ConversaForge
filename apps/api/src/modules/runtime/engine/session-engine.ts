@@ -21,7 +21,7 @@ import type { PrismaService } from '../../../common/prisma/prisma.service';
 import type { UsageService } from '../../usage/usage.service';
 import type { OptionalDepsService } from '../optional-deps.service';
 import { hydrateRuntimeState, type ConsentRecord, type PendingInstruction, type ProviderInfo, type RuntimeState } from '../runtime.types';
-import type { ToolOutcome, ToolRegistry, Toolset } from '../tools/tool-registry';
+import { UPDATE_PROGRESS_TOOL, type ToolOutcome, type ToolRegistry, type Toolset } from '../tools/tool-registry';
 import type { ProviderResolverService } from '../voice/provider-resolver.service';
 import { buildHistory, triggerEvent, type GenerationTrigger, type TurnRecord } from './history';
 import {
@@ -774,8 +774,11 @@ export class SessionEngine {
       ...this.turnOffsets(),
       metadata: speaker === 'AGENT' ? { provider: this.providerInfo?.realtime?.provider ?? 'openai', realtime: true } : {},
     });
-    if (turn && speaker === 'AGENT' && st === 'ENDING') {
-      this.closingWaitUntil = Math.min(this.closingWaitUntil || Infinity, Date.now() + estimateSpeechMs(text) + 1500);
+    if (turn && speaker === 'AGENT') {
+      // The live model reports a turn when it has generated it; the audio is still playing out. Silence
+      // (check-in) is measured from roughly the end of playback.
+      this.agentBusyUntil = Date.now() + estimateSpeechMs(text, this.config.persona.voice.speed);
+      if (st === 'ENDING') this.closingWaitUntil = Math.min(this.closingWaitUntil || Infinity, Date.now() + estimateSpeechMs(text) + 1500);
     }
     if (turn && speaker === 'PARTICIPANT' && this.deferredClose) {
       const d = this.deferredClose;
@@ -811,8 +814,11 @@ export class SessionEngine {
       input = { __invalid_json: String(msg.arguments).slice(0, 200) };
     }
     const toolset = await this.ensureToolset();
-    const out = await this.deps.tools.executeAgentCall(this.toolCtx('AGENT'), { id: callId, name: String(msg.name).slice(0, 80), input }, toolset);
-    this.send({ type: 'realtime.tool_result', callId, output: out.content });
+    const name = String(msg.name).slice(0, 80);
+    const out = await this.deps.tools.executeAgentCall(this.toolCtx('AGENT'), { id: callId, name, input }, toolset);
+    // Progress bookkeeping comes after the spoken reply: answering it must not make the model talk again.
+    const silent = name === UPDATE_PROGRESS_TOOL && !out.isError;
+    this.send({ type: 'realtime.tool_result', callId, output: out.content, ...(silent ? { silent } : {}) });
     await this.applyOutcome(out, callId);
     if (out.endSession && this.currentState === 'ACTIVE') {
       this.state.endRequested = { reason: out.endSession.reason, by: 'agent', closingTurnId: null };
@@ -1573,14 +1579,21 @@ export class SessionEngine {
 
     // Silence check-in: only once per silence, never while the participant is speaking.
     const silenceMs = this.config.conversation.turnTaking.silenceCheckInMs;
-    if (silenceMs > 0 && !this.realtime && !this.gen && !this.silenceFired && !this.participantBusy() && !this.state.endRequested) {
+    if (silenceMs > 0 && !this.gen && !this.silenceFired && !this.participantBusy() && !this.state.endRequested) {
       const lastTurn = this.turns[this.turns.length - 1];
       const timerRunning = this.state.presentedTools.some((t) => t.toolId === 'timer' && !t.closed && t.data?.endsAt && Date.parse(String(t.data.endsAt)) > now);
       const since = Math.max(this.lastParticipantActivityAt, Math.min(this.agentBusyUntil, now));
       if (lastTurn?.speaker === 'AGENT' && !timerRunning && now >= this.agentBusyUntil && now - since >= silenceMs) {
         this.silenceFired = true;
-        await this.logEvent('silence.check_in', { silentMs: now - since });
-        await this.scheduleGeneration({ kind: 'silence_check_in', silentMs: now - since });
+        const trigger = { kind: 'silence_check_in', silentMs: now - since } as const;
+        await this.logEvent('silence.check_in', { silentMs: trigger.silentMs });
+        if (this.realtime) {
+          // The live model never speaks unprompted: ask it for the check-in. Dropped by the browser if the
+          // participant starts talking before the model is free to take it.
+          this.send({ type: 'realtime.instruction', text: triggerEvent(trigger)!, respond: true, cancelOnSpeech: true });
+        } else {
+          await this.scheduleGeneration(trigger);
+        }
       }
     }
   }

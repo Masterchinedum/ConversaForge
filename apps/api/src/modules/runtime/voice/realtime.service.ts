@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
-import { ActivityHandling, EndSensitivity, Modality, StartSensitivity, type GoogleGenAI, type LiveConnectConfig } from '@google/genai';
+import { ActivityHandling, Behavior, EndSensitivity, Modality, StartSensitivity, type GoogleGenAI, type LiveConnectConfig } from '@google/genai';
 import type { RealtimeProviderId, ScenarioConfig } from '@cf/shared';
 import { env } from '../../../config/env';
 import { Errors } from '../../../common/http/errors';
 import { LlmService } from '../../../common/llm/llm.service';
 import { geminiClient } from '../../../common/llm/google.provider';
 import type { LlmToolSpec } from '../../../common/llm/llm.types';
+import { UPDATE_PROGRESS_TOOL } from '../tools/tool-registry';
 
 export const OPENAI_REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const REALTIME_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
@@ -21,6 +22,12 @@ export const GEMINI_VOICES = [
   'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
   'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat',
 ];
+
+/**
+ * Added to the scenario's end-of-turn silence for Gemini. Its activity detection is purely silence-based
+ * (OpenAI's semantic VAD hears that "so, um…" is unfinished), so thinking pauses need extra room.
+ */
+export const GEMINI_THINKING_PAD_MS = 800;
 
 /** Ephemeral-token lifetimes for Gemini Live (single use; resuming a session does not consume a use). */
 export const GEMINI_TOKEN = {
@@ -60,7 +67,7 @@ export interface GeminiLiveCredentials {
    */
   connectConfig: {
     responseModalities: ['AUDIO'];
-    inputAudioTranscription: Record<string, never>;
+    inputAudioTranscription: { languageCodes?: string[] };
     outputAudioTranscription: Record<string, never>;
     sessionResumption: { handle?: string };
   };
@@ -80,6 +87,8 @@ export interface MintInput {
   config: ScenarioConfig;
   /** Gemini Live session-resumption handle from the previous connection (reconnect / goAway). */
   resumeHandle?: string;
+  /** Gemini Live: the browser streams the mic ungated (see `geminiLiveConfig`). */
+  plainAudio?: boolean;
 }
 
 /**
@@ -157,6 +166,7 @@ export class RealtimeService {
       voice: typeof secret.config.voice === 'string' ? secret.config.voice : undefined,
       model,
       resumeHandle: input.resumeHandle,
+      plainAudio: input.plainAudio,
     });
     const now = Date.now();
     const expireTime = new Date(now + GEMINI_TOKEN.expireSeconds * 1000);
@@ -183,7 +193,7 @@ export class RealtimeService {
       voice: liveConfig.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName ?? null,
       connectConfig: {
         responseModalities: ['AUDIO'],
-        inputAudioTranscription: {},
+        inputAudioTranscription: liveConfig.inputAudioTranscription ?? {},
         outputAudioTranscription: {},
         sessionResumption: input.resumeHandle ? { handle: input.resumeHandle } : {},
       },
@@ -207,12 +217,16 @@ export function geminiVoice(...candidates: Array<string | undefined>): string | 
  * the same function tools the OpenAI path exposes (as `functionDeclarations` with JSON-schema parameters),
  * input/output transcription, VAD tuned for thinking pauses, barge-in policy, session resumption and
  * context-window compression (audio sessions are otherwise capped at ~15 minutes).
+ *
+ * `plainAudio` (experiment): the browser sends the mic continuously with only its echo canceller, the way
+ * Google's reference clients do, so start-of-speech sensitivity stays at Google's default instead of the
+ * LOW setting that compensates for our echo gate. End-of-turn settings (thinking pauses) are the same.
  */
 export function geminiLiveConfig(
   config: ScenarioConfig,
   instructions: string,
   tools: LlmToolSpec[],
-  opts: { voice?: string; model: string; resumeHandle?: string },
+  opts: { voice?: string; model: string; resumeHandle?: string; plainAudio?: boolean },
 ): LiveConnectConfig {
   const tt = config.conversation.turnTaking;
   const voiceName = geminiVoice(config.persona.voice.voiceId, opts.voice);
@@ -226,20 +240,36 @@ export function geminiLiveConfig(
     responseModalities: [Modality.AUDIO],
     systemInstruction: { parts: [{ text: instructions }] },
     ...(tools.length
-      ? { tools: [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.inputSchema })) }] }
+      ? {
+          tools: [
+            {
+              functionDeclarations: tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                parametersJsonSchema: t.inputSchema,
+                // Progress bookkeeping follows the spoken reply. As a blocking call the model waits for the
+                // result and then generates again — re-asking the question it just asked, every turn. Non-
+                // blocking + a SILENT response (sent by the browser) only adds it to the context.
+                ...(t.name === UPDATE_PROGRESS_TOOL ? { behavior: Behavior.NON_BLOCKING } : {}),
+              })),
+            },
+          ],
+        }
       : {}),
     ...(Object.keys(speechConfig).length ? { speechConfig } : {}),
-    inputAudioTranscription: {},
+    // Without a hint the transcriber guesses the language per utterance, and accented English can come
+    // back as Spanish or another language.
+    inputAudioTranscription: config.basics.language ? { languageCodes: [config.basics.language] } : {},
     outputAudioTranscription: {},
     realtimeInputConfig: {
       automaticActivityDetection: {
         // Start of speech is detected conservatively: residual echo of the agent's own voice, keyboard
         // clicks and room noise must not count as the participant interrupting (the browser additionally
         // withholds mic audio while the agent is audible unless its local VAD hears the participant).
-        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+        ...(opts.plainAudio ? {} : { startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW }),
         // End of speech is detected less eagerly and after a longer silence, so thinking pauses are not cut off.
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-        silenceDurationMs: Math.max(500, Math.min(3000, tt.endOfTurnSilenceMs)),
+        silenceDurationMs: Math.max(500, Math.min(3000, tt.endOfTurnSilenceMs + GEMINI_THINKING_PAD_MS)),
       },
       activityHandling: tt.allowBargeIn ? ActivityHandling.START_OF_ACTIVITY_INTERRUPTS : ActivityHandling.NO_INTERRUPTION,
     },

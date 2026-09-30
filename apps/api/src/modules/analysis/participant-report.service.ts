@@ -108,11 +108,25 @@ export class ParticipantReportService {
 
   /** The logged-in user's own session (participant linked to their user id). */
   async forUser(userId: string, sessionId: string) {
+    return this.forSession(await this.ownSession(userId, sessionId));
+  }
+
+  async ownSession(userId: string, sessionId: string): Promise<Session> {
     const session = await this.prisma.session.findFirst({
       where: { id: sessionId, deletedAt: null, participant: { userId, deletedAt: null }, workspace: { deletedAt: null } },
     });
     if (!session) throw Errors.notFound('Session');
-    return this.forSession(session);
+    return session;
+  }
+
+  /** Transcript downloads follow the same rule as the report: analysis.participantCanSeeTranscript. */
+  async assertTranscriptVisible(session: Session) {
+    if (session.deletedAt) throw Errors.notFound('Session');
+    const version = await this.prisma.scenarioVersion.findFirst({ where: { id: session.scenarioVersionId, workspaceId: session.workspaceId }, select: { config: true } });
+    if (!version) throw Errors.notFound('Session');
+    if (!parseVersionConfig(version.config).analysis.participantCanSeeTranscript) {
+      throw Errors.forbidden('The organizer has not shared transcripts for this scenario');
+    }
   }
 
   /** "My sessions" across every workspace where the user was the participant. */

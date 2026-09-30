@@ -158,7 +158,12 @@ export type ServerMessage =
   | { type: 'tool.present'; tool: PresentedTool }
   | { type: 'tool.update'; toolCallId: string; data: Record<string, unknown> }
   | { type: 'tool.close'; toolCallId: string }
-  | { type: 'realtime.tool_result'; callId: string; output: string }
+  /**
+   * Realtime mode: the server's result for a relayed tool call. `silent` (additive): bookkeeping only
+   * (update_progress) — add it to the model's context without asking for another response, or the model
+   * speaks again after every reply.
+   */
+  | { type: 'realtime.tool_result'; callId: string; output: string; silent?: boolean }
   /**
    * (B, additive) Realtime mode only: an instruction for the realtime model (timed nudge, wrap-up, closing).
    * OpenAI: the client forwards it on the data channel as a `conversation.item.create` with role
@@ -166,7 +171,13 @@ export type ServerMessage =
    * Google Gemini Live: the client sends it as a client-content text turn (clearly framed as a runtime
    * instruction) with `turnComplete = respond`, deferred while the model is generating.
    */
-  | { type: 'realtime.instruction'; text: string; respond?: boolean }
+  | {
+      type: 'realtime.instruction';
+      text: string;
+      respond?: boolean;
+      /** (additive) Stale once the participant speaks (silence check-in): drop it if it has not been sent yet. */
+      cancelOnSpeech?: boolean;
+    }
   | { type: 'timer'; elapsedMs: number; remainingMs: number }
   | { type: 'notice'; level: 'info' | 'warning'; message: string }
   | { type: 'end'; reason: string; endedBy: string }

@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Alert, Badge, Button, Card, ConfirmButton, CopyButton, EmptyState, ErrorState, Field, Input, Loading, Modal, PageHeader, Select, Table, Tabs, Td, Textarea, Th, useToast } from '@/components/ui';
-import { api, errorMessage } from '@/lib/api';
+import { api, download, errorMessage } from '@/lib/api';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';
 
@@ -634,7 +634,7 @@ function BatchesTab() {
 // ───────────────────────── Meetings ─────────────────────────
 
 function MeetingsTab({ av }: { av: Availability }) {
-  const { wsPath, href } = useWorkspace();
+  const { wsPath, href, can } = useWorkspace();
   const toast = useToast();
   const bots = useSWR<{ data: Bot[] }>([wsPath('/channels/meeting-bots'), { limit: 50 }], { refreshInterval: 10_000 });
   const [form, setForm] = useState({ meetingUrl: '', scenarioId: '', joinAt: '', evaluatedSpeakerName: '', mode: 'agent' as Bot['mode'] });
@@ -743,9 +743,19 @@ function MeetingsTab({ av }: { av: Availability }) {
                   <Td>{b.scheduledAt ? formatDate(b.scheduledAt) : 'Now'}</Td>
                   <Td>
                     {b.sessionId ? (
-                      <Link className="text-xs text-brand-700 hover:underline" href={href(`/sessions/${b.sessionId}`)}>
-                        Open session
-                      </Link>
+                      <span className="flex flex-col gap-0.5">
+                        <Link className="text-xs text-brand-700 hover:underline" href={href(`/sessions/${b.sessionId}`)}>
+                          Open session
+                        </Link>
+                        {can('exports.download') && (
+                          <button
+                            className="text-left text-xs text-brand-700 hover:underline"
+                            onClick={() => download(wsPath(`/sessions/${b.sessionId}/transcript.txt`), `transcript-${b.sessionId}.txt`).catch((e) => toast.error(errorMessage(e)))}
+                          >
+                            Download transcript
+                          </button>
+                        )}
+                      </span>
                     ) : (
                       '—'
                     )}
