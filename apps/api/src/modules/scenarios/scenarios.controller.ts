@@ -11,6 +11,7 @@ import {
   ApplyProposalBody,
   AssistantBody,
   AssistantListQuery,
+  StudioRunBody,
   CreateScenarioBody,
   DiffQuery,
   ExportQuery,
@@ -26,6 +27,7 @@ import {
   ValidateBody,
 } from './scenarios.schemas';
 import { ScenariosService } from './scenarios.service';
+import { StudioAgentService } from './studio-agent.service';
 
 /**
  * Scenario authoring API. All routes are scoped to a workspace (WorkspaceGuard enforces membership);
@@ -37,6 +39,7 @@ export class ScenariosController {
   constructor(
     private readonly scenarios: ScenariosService,
     private readonly assistant: DraftAssistantService,
+    private readonly agent: StudioAgentService,
   ) {}
 
   @Get()
@@ -269,6 +272,39 @@ export class ScenariosController {
     @Body(new ZodPipe(ApplyProposalBody)) body: z.infer<typeof ApplyProposalBody>,
   ) {
     return this.assistant.apply(ws, p, id, proposalId, body?.paths);
+  }
+
+  // ── Scenario Studio agent runs (edit the draft in steps; progress is polled) ──
+
+  @Post(':scenarioId/studio/runs')
+  @RequireCapability('scenarios.edit')
+  startRun(
+    @Param('workspaceId') ws: string,
+    @Param('scenarioId') id: string,
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodPipe(StudioRunBody)) body: z.infer<typeof StudioRunBody>,
+  ) {
+    return this.agent.start(ws, p, id, body);
+  }
+
+  @Get(':scenarioId/studio/runs/:runId')
+  @RequireCapability('scenarios.edit')
+  getRun(@Param('workspaceId') ws: string, @Param('scenarioId') id: string, @Param('runId') runId: string) {
+    return this.agent.get(ws, id, runId);
+  }
+
+  @Post(':scenarioId/studio/runs/:runId/cancel')
+  @HttpCode(200)
+  @RequireCapability('scenarios.edit')
+  cancelRun(@Param('workspaceId') ws: string, @Param('scenarioId') id: string, @Param('runId') runId: string) {
+    return this.agent.cancel(ws, id, runId);
+  }
+
+  @Post(':scenarioId/studio/runs/:runId/undo')
+  @HttpCode(200)
+  @RequireCapability('scenarios.edit')
+  undoRun(@Param('workspaceId') ws: string, @Param('scenarioId') id: string, @Param('runId') runId: string, @CurrentPrincipal() p: Principal) {
+    return this.agent.undo(ws, p, id, runId);
   }
 
   @Post(':scenarioId/assistant/:proposalId/reject')

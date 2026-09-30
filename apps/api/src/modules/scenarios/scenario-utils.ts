@@ -4,6 +4,7 @@ import {
   normalizeScenarioConfig,
   parseScenarioConfig,
   stableStringify,
+  type EditableFieldPath,
   type ScenarioConfig,
 } from '@cf/shared';
 
@@ -46,6 +47,13 @@ export function isSafeConfigPath(path: string): boolean {
 
 export function isEditableFieldPath(path: string): boolean {
   return (EDITABLE_FIELD_PATHS as readonly string[]).includes(path);
+}
+
+/** The editable (lockable) field that contains a config path, e.g. rubric.criteria.0.weight → rubric. */
+export function lockablePathFor(path: string): EditableFieldPath | null {
+  let best: EditableFieldPath | null = null;
+  for (const p of EDITABLE_FIELD_PATHS) if ((path === p || path.startsWith(`${p}.`)) && (!best || p.length > best.length)) best = p;
+  return best;
 }
 
 /** A path is locked when it equals a locked path, or one contains the other. */

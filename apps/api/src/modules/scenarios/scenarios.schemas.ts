@@ -93,6 +93,10 @@ export const UpdateScenarioMetaBody = z.object({ isTemplate: z.boolean().optiona
 export const GalleryListBody = z.object({ listed: z.boolean() });
 
 export const AssistantBody = z.object({ instruction: z.string().trim().min(3).max(4000) });
+export const StudioRunBody = z.object({
+  instruction: z.string().trim().min(3).max(4000),
+  mode: z.enum(['standard', 'flash', 'deep']).default('standard'),
+});
 export const AssistantListQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) });
 export const ApplyProposalBody = z
   .object({ paths: z.array(z.enum(EDITABLE_FIELD_PATHS)).min(1).max(EDITABLE_FIELD_PATHS.length).optional() })
