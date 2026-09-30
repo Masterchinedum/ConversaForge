@@ -559,7 +559,9 @@ d('Developer platform, webhooks & channels (integration)', () => {
     const calls: Array<{ url: string; init: any }> = [];
     let n = 0;
     let recallCodes: string[] = [];
+    let pageHealth: () => Response = () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
     meetings.fetchImpl = (async (url: string, init: any) => {
+      if (url.endsWith('/health')) return pageHealth();
       calls.push({ url, init });
       if (init.method === 'POST' && url.endsWith('/bot/')) return new Response(JSON.stringify({ id: `bot_agent_${++n}` }), { status: 201 });
       if (init.method === 'GET' && /\/bot\/bot_agent_\d+\/$/.test(url)) return new Response(JSON.stringify({ status_changes: recallCodes.map((code) => ({ code })) }), { status: 200 });
@@ -574,6 +576,19 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect((await practice({ meetingUrl: 'https://example.com/not-a-meeting' })).statusCode).toBe(422);
     // Non-members cannot send bots into this workspace's scenarios.
     expect((await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' }, otherToken)).statusCode).toBe(404);
+
+    // The bot page must be reachable from the internet, or the bot would sit in the meeting silently.
+    pageHealth = () => {
+      throw new TypeError('fetch failed');
+    };
+    const down = await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' });
+    expect(down.statusCode).toBe(409);
+    expect(down.json().error).toMatchObject({ code: 'bot_page_unreachable' });
+    expect(down.json().error.message).toMatch(/https:\/\/app\.h-test\.example.*not reachable.*tunnel/);
+    pageHealth = () => new Response('<html><title>ngrok</title>You are about to visit…</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    expect((await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })).json().error.message).toMatch(/ngrok shows its browser warning page/);
+    expect(calls.filter((c) => c.init.method === 'POST' && c.url.endsWith('/bot/'))).toHaveLength(0);
+    pageHealth = () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
 
     const r = await practice({ meetingUrl: 'https://meet.google.com/abc-defg-hij' });
     expect(r.statusCode).toBe(201);
@@ -618,7 +633,8 @@ d('Developer platform, webhooks & channels (integration)', () => {
     recallCodes = [];
 
     // Members read their own bots only; realtime transcript webhooks are ignored for agents.
-    expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${bot.id}`, headers: auth(userToken) })).json().status).toBe('IN_CALL');
+    const own = (await inject({ method: 'GET', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${bot.id}`, headers: auth(userToken) })).json();
+    expect(own).toMatchObject({ status: 'IN_CALL', pageLoaded: true, botPageOrigin: 'https://app.h-test.example' });
     const hook = new URL(meetings.realtimeEndpointUrl(bot.id));
     await inject({
       method: 'POST',

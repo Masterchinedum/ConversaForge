@@ -14,6 +14,10 @@ export interface PracticeBot {
   sessionId: string | null;
   lastError: string | null;
   scheduledAt: string | null;
+  lastEventAt?: string | null;
+  /** AI agent bots: whether Recall's browser opened the bot page (null for notetakers). */
+  pageLoaded?: boolean | null;
+  botPageOrigin?: string | null;
 }
 
 const ACTIVE = new Set(['SCHEDULED', 'JOINING', 'IN_CALL']);
@@ -139,7 +143,12 @@ export function MeetingPracticeModal({
               {who} is joining. If your meeting has a lobby or waiting room, <strong>admit “{who}”</strong>.
             </p>
           )}
-          {b.status === 'IN_CALL' && <p>{who} is in the meeting. Say hello to begin — the practice session starts when someone speaks.</p>}
+          {b.status === 'IN_CALL' && <p>{who} is in the meeting and will greet you in a moment.</p>}
+          {b.status === 'IN_CALL' && b.pageLoaded === false && b.lastEventAt && Date.now() - new Date(b.lastEventAt).getTime() > 20_000 && (
+            <Alert tone="warning" title="The bot is in the meeting but cannot open its page">
+              It opens {b.botPageOrigin ?? 'the web app'}/bot/… to speak, and that page has not loaded. If you use a tunnel (ngrok, cloudflared), check that it is running and that WEB_PUBLIC_URL is its current address, then remove the bot and send it again.
+            </Alert>
+          )}
           {b.status === 'COMPLETED' && (
             <div className="space-y-2">
               <p>

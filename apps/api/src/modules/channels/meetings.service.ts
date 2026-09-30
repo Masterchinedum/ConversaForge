@@ -152,14 +152,67 @@ export class MeetingsService implements OnModuleInit {
   async get(workspaceId: string, id: string) {
     const b = await this.prisma.meetingBot.findFirst({ where: { id, workspaceId } });
     if (!b) throw Errors.notFound('Meeting bot');
-    return this.serialize(b);
+    return this.withPageState(b);
   }
 
   /** A member's own practice bot (never someone else's). */
   async getOwn(workspaceId: string, userId: string, id: string) {
     const b = await this.prisma.meetingBot.findFirst({ where: { id, workspaceId, createdById: userId } });
     if (!b) throw Errors.notFound('Meeting bot');
-    return this.serialize(b);
+    return this.withPageState(b);
+  }
+
+  /** Agent bots: whether Recall's browser has opened our bot page (it reports `bot.page` → loaded). */
+  private async withPageState(b: MeetingBot) {
+    const out = this.serialize(b);
+    if (b.mode !== 'agent' || !b.sessionId) return { ...out, pageLoaded: null as boolean | null, botPageOrigin: null as string | null };
+    const seen = await this.prisma.sessionEvent.count({ where: { sessionId: b.sessionId, type: 'bot.page' } });
+    return { ...out, pageLoaded: seen > 0, botPageOrigin: env.WEB_PUBLIC_URL.replace(/\/$/, '') };
+  }
+
+  private pageCheckedAt = 0;
+
+  /**
+   * Before sending an agent bot: Recall's browser must be able to open WEB_PUBLIC_URL/bot/…, or the bot
+   * sits in the meeting with no page and says nothing. `/health` on the web origin is proxied to the API,
+   * so a JSON "ok" proves the public address reaches this app. Requested like a browser, so a tunnel's
+   * browser warning page (ngrok free plan) is caught too. Success is cached for a minute.
+   */
+  async assertBotPageReachable() {
+    if (Date.now() - this.pageCheckedAt < 60_000) return;
+    const base = env.WEB_PUBLIC_URL.replace(/\/$/, '');
+    const fix = 'If you use a tunnel (ngrok, cloudflared), start it and make sure WEB_PUBLIC_URL is its current address, then restart the API.';
+    let status = 0;
+    let text = '';
+    try {
+      const res = await this.fetchImpl(`${base}/health`, {
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', Accept: 'text/html,application/json' },
+        signal: AbortSignal.timeout(8000),
+      } as RequestInit);
+      status = res.status;
+      text = (await res.text()).slice(0, 4000);
+    } catch (e: any) {
+      throw new AppError(409, 'bot_page_unreachable', `The AI bot opens its page at ${base}, but that address is not reachable (${e?.name === 'TimeoutError' ? 'timed out' : e?.message ?? 'network error'}). ${fix}`, { url: base });
+    }
+    let ok = false;
+    try {
+      ok = JSON.parse(text)?.status === 'ok';
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      const ngrok = /ngrok/i.test(text);
+      throw new AppError(
+        409,
+        'bot_page_unreachable',
+        ngrok
+          ? `The AI bot opens its page at ${base}, but ngrok shows its browser warning page there, which the bot cannot click through. Use a tunnel without an interstitial (e.g. cloudflared) or an ngrok plan/domain without it.`
+          : `The AI bot opens its page at ${base}, but that address answered ${status || 'with something else'} instead of this app. ${fix}`,
+        { url: base, status },
+      );
+    }
+    this.pageCheckedAt = Date.now();
   }
 
   async create(workspaceId: string, principal: Principal, input: z.infer<typeof CreateMeetingBotBody>, participant?: MeetingParticipant) {
@@ -183,6 +236,8 @@ export class MeetingsService implements OnModuleInit {
     const pub = this.providers.publicUrlStatus();
     const page = this.providers.botPageUrlStatus();
     const blockedReason = !creds ? RECALL_MISSING : !pub.ok ? pub.reason : mode === 'agent' && !page.ok ? page.reason : null;
+    // An agent bot whose page cannot load joins the meeting and stays silent: refuse up front instead.
+    if (mode === 'agent' && !blockedReason) await this.assertBotPageReachable();
     const bot = await this.prisma.meetingBot.create({
       data: {
         workspaceId,
