@@ -9,12 +9,14 @@ import { join } from 'node:path';
  * a session pinned to v1 → AI edit → Publish Changes (v2) → the session still counts against v1.
  * Then the same Studio at phone width.
  *
+ * Screenshots of each step: apps/web/node_modules/.cache/cf-e2e/studio-journey/ (or E2E_SHOTS_DIR).
  * Runs against the local simulator drafter (no AI provider key), so the assistant is deterministic.
  * Run: E2E_WEB_URL=http://localhost:3101 E2E_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/scenario-studio.spec.ts
  */
 test.setTimeout(240_000);
 
-const SHOTS = join(__dirname, '..', 'test-results', 'studio-journey');
+// Outside test-results/ (Playwright empties it on every run); node_modules/.cache is git-ignored.
+const SHOTS = process.env.E2E_SHOTS_DIR ?? join(__dirname, '..', 'node_modules', '.cache', 'cf-e2e', 'studio-journey');
 mkdirSync(SHOTS, { recursive: true });
 const shot = (page: Page, name: string) => page.screenshot({ path: join(SHOTS, `${name}.png`) });
 
