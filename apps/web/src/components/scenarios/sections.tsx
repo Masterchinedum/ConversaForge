@@ -1,5 +1,5 @@
 'use client';
-import { useId, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useId, useMemo, type ReactNode } from 'react';
 import useSWR from 'swr';
 import {
   EXTRACTION_TYPES,
@@ -25,6 +25,7 @@ import { ApiError } from '@/lib/api';
 import { Badge, Button, Card, Checkbox, Input, Select, Textarea, clsx } from '@/components/ui';
 import { fieldDomId, useEditor, useField } from './editor-context';
 import {
+  AudienceBadge,
   JsonObjectInput,
   LockButton,
   NumberField,
@@ -40,13 +41,36 @@ import {
   toSlugId,
 } from './fields';
 
+/** Scenario Studio renders groups flat inside its own collapsible sections (no card-in-card). */
+export const FlatGroups = createContext(false);
+
 export function Group({ title, path, description, children, id }: { title: ReactNode; path?: string; description?: ReactNode; children: ReactNode; id?: string }) {
+  const flat = useContext(FlatGroups);
+  if (flat) {
+    return (
+      <div className="scroll-mt-24 space-y-3 border-t border-slate-100 pt-4 first:border-t-0 first:pt-0">
+        <div className="flex items-center justify-between gap-2">
+          <h3 id={id} className="text-sm font-semibold text-slate-900">
+            {title}
+            {path && <AudienceBadge path={path} />}
+          </h3>
+          {path && <LockButton path={path} />}
+        </div>
+        <div id={path ? fieldDomId(path) : undefined} className="space-y-4">
+          {description && <p className="text-xs text-slate-500">{description}</p>}
+          {children}
+          {path && <SectionIssues path={path} />}
+        </div>
+      </div>
+    );
+  }
   return (
     <Card
       className="scroll-mt-24"
       title={
         <span id={id} className="flex items-center gap-2">
           {title}
+          {path && <AudienceBadge path={path} />}
         </span>
       }
       actions={path ? <LockButton path={path} /> : undefined}
@@ -90,7 +114,23 @@ export function BasicsSection() {
 
 // ───────────────────────────── Persona & instructions ─────────────────────────────
 
-export function PersonaSection({ advanced = true }: { advanced?: boolean }) {
+export function VoiceFields() {
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-800">Voice</h3>
+        <LockButton path="persona.voice" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3" id={fieldDomId('persona.voice')}>
+        <VoiceOrder />
+        <TextField path="persona.voice.voiceId" label="Voice id" placeholder="model default" hint="Live voice name, e.g. Kore or Puck (Gemini), marin or cedar (OpenAI)." />
+        <NumberField path="persona.voice.speed" label="Speed" min={0.5} max={2} step={0.05} />
+      </div>
+    </>
+  );
+}
+
+export function PersonaSection({ advanced = true, voice = advanced }: { advanced?: boolean; voice?: boolean }) {
   return (
     <Group title="AI persona" id="sec-persona">
       <div className={grid}>
@@ -98,17 +138,9 @@ export function PersonaSection({ advanced = true }: { advanced?: boolean }) {
         <TextField path="persona.name" label="Persona name" placeholder="e.g. Alex" />
       </div>
       <TextAreaField path="persona.description" label="Persona description" rows={4} hint="Personality, background, hidden facts, how they react. Your words are kept verbatim." />
+      {voice && <VoiceFields />}
       {advanced && (
         <>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800">Voice</h3>
-            <LockButton path="persona.voice" />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3" id={fieldDomId('persona.voice')}>
-            <VoiceOrder />
-            <TextField path="persona.voice.voiceId" label="Voice id" placeholder="model default" hint="Live voice name, e.g. Kore or Puck (Gemini), marin or cedar (OpenAI)." />
-            <NumberField path="persona.voice.speed" label="Speed" min={0.5} max={2} step={0.05} />
-          </div>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-800">Avatar</h3>
             <LockButton path="persona.avatar" />
@@ -177,7 +209,10 @@ export function FirstTurnEditor() {
   return (
     <div className="space-y-3 rounded-md border border-slate-200 p-3" id={fieldDomId('conversation.firstTurn')}>
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-800">First turn</h3>
+        <h3 className="text-sm font-semibold text-slate-800">
+          First turn
+          <AudienceBadge path="conversation.firstTurn" />
+        </h3>
         <LockButton path="conversation.firstTurn" />
       </div>
       <SelectField path="conversation.firstTurn.speaker" label="Who speaks first" options={[{ value: 'agent', label: 'The AI' }, { value: 'participant', label: 'The participant' }]} />
@@ -202,7 +237,10 @@ export function AgendaEditor() {
   return (
     <div className="space-y-3" id={fieldDomId('conversation.agenda')}>
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-800">Agenda ({items.length})</h3>
+        <h3 className="text-sm font-semibold text-slate-800">
+          Agenda ({items.length})
+          <AudienceBadge path="conversation.agenda" />
+        </h3>
         <LockButton path="conversation.agenda" />
       </div>
       {items.map((a, i) => (
@@ -611,7 +649,7 @@ export function MemoryCoachSection() {
 
 // ───────────────────────────── Tools, knowledge, functions ─────────────────────────────
 
-export function ToolsSection() {
+export function ToolsSection({ functions = true }: { functions?: boolean }) {
   const [enabled = [], set] = useField<ToolEnablement[]>('tools.enabled');
   const { readOnly } = useEditor();
   const byId = new Map(enabled.map((t) => [t.toolId, t]));
@@ -668,7 +706,7 @@ export function ToolsSection() {
             </li>
           ))}
       </ul>
-      <CustomFunctionsPicker />
+      {functions && <CustomFunctionsPicker />}
     </Group>
   );
 }
@@ -728,7 +766,7 @@ function MultiPicker({
   );
 }
 
-function CustomFunctionsPicker() {
+export function CustomFunctionsPicker() {
   const { workspaceId } = useEditor();
   const { items, unavailable } = useOptionalList<{ id: string; name: string; description?: string; enabled?: boolean }>(`/workspaces/${workspaceId}/functions`);
   const options = useMemo(() => items.map((f) => ({ id: f.id, label: f.name, sub: `${f.description ?? ''}${f.enabled === false ? ' (disabled)' : ''}` })), [items]);

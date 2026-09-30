@@ -27,8 +27,12 @@ test('scenario authoring journey', async ({ page }) => {
   await page.getByRole('dialog').getByLabel('Name').fill('E2E discovery call');
   await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
   await page.waitForURL(new RegExp(`/w/${ws}/scenarios/[a-z0-9]+$`));
-  await expect(page.getByTestId('scenario-title')).toHaveText('E2E discovery call');
   const scenarioId = page.url().split('/').pop()!;
+  // Scenarios open in Scenario Studio (see scenario-studio.spec.ts); this journey covers the classic editor.
+  await expect(page.getByRole('heading', { name: 'Scenario Studio' })).toBeVisible();
+  await page.getByRole('button', { name: 'Classic' }).click();
+  await page.waitForURL(/view=classic/);
+  await expect(page.getByTestId('scenario-title')).toHaveText('E2E discovery call');
 
   // Lock the name, then ask the drafting assistant (local simulator)
   await page.getByRole('tab', { name: 'Advanced' }).click();

@@ -62,7 +62,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   );
 });
 
-export function ButtonLink({ href, variant = 'primary', size = 'md', className, children, ...rest }: { href: string; variant?: Variant; size?: keyof typeof sizes; className?: string; children: ReactNode; target?: string }) {
+export function ButtonLink({ href, variant = 'primary', size = 'md', className, children, ...rest }: { href: string; variant?: Variant; size?: keyof typeof sizes; className?: string; children: ReactNode; target?: string; 'data-testid'?: string }) {
   return (
     <Link
       href={href}

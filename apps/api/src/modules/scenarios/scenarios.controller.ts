@@ -10,6 +10,7 @@ import { compiledPrompt, participantPreview } from './scenario-preview';
 import {
   ApplyProposalBody,
   AssistantBody,
+  AssistantListQuery,
   CreateScenarioBody,
   DiffQuery,
   ExportQuery,
@@ -242,8 +243,8 @@ export class ScenariosController {
 
   @Get(':scenarioId/assistant')
   @RequireCapability('scenarios.edit')
-  listProposals(@Param('workspaceId') ws: string, @Param('scenarioId') id: string) {
-    return this.assistant.list(ws, id);
+  listProposals(@Param('workspaceId') ws: string, @Param('scenarioId') id: string, @Query(new ZodPipe(AssistantListQuery)) q: z.infer<typeof AssistantListQuery>) {
+    return this.assistant.list(ws, id, q.limit);
   }
 
   @Post(':scenarioId/assistant')

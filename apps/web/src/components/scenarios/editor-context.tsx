@@ -10,6 +10,8 @@ export interface EditorCtx {
   readOnly: boolean;
   issues: ValidationIssue[];
   workspaceId: string;
+  /** Scenario Studio: whether the assistant has a pending suggestion for, or just updated, a lockable field. */
+  aiMark?: (path: string) => 'pending' | 'updated' | null;
 }
 
 export const EditorContext = createContext<EditorCtx | null>(null);
@@ -43,8 +45,11 @@ export function focusField(path: string): boolean {
   for (let i = parts.length; i > 0; i--) {
     const el = document.getElementById(fieldDomId(parts.slice(0, i).join('.')));
     if (el) {
+      // Fields inside collapsed <details> (e.g. "More options") are revealed first.
+      for (let d = el.closest('details'); d; d = d.parentElement?.closest('details') ?? null) d.open = true;
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const focusable = (el.matches('input,textarea,select,button') ? el : el.querySelector('input,textarea,select,button')) as HTMLElement | null;
+      // Prefer the field's control over the lock button that precedes it.
+      const focusable = (el.matches('input,textarea,select,button') ? el : el.querySelector('input:not([type=hidden]),textarea,select') ?? el.querySelector('button')) as HTMLElement | null;
       focusable?.focus({ preventScroll: true });
       el.classList.add('ring-2', 'ring-amber-400');
       setTimeout(() => el.classList.remove('ring-2', 'ring-amber-400'), 1600);

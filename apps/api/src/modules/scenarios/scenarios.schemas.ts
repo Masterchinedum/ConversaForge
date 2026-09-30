@@ -28,6 +28,12 @@ export const CreateScenarioBody = z.discriminatedUnion('source', [
   z.object({ source: z.literal('template'), templateKey: z.string().min(1).max(80), name: OptName }),
   z.object({ source: z.literal('import'), text: ImportText, format: Format, name: OptName }),
   z.object({ source: z.literal('duplicate'), scenarioId: z.string().min(1).max(64), versionId: z.string().min(1).max(64).optional(), name: OptName }),
+  // Scenario Studio: the draft starts from whatever the creator has so far (possibly nothing but a lock).
+  z.object({
+    source: z.literal('studio'),
+    config: z.record(z.unknown()).optional(),
+    lockedFields: z.array(z.enum(EDITABLE_FIELD_PATHS)).max(EDITABLE_FIELD_PATHS.length).optional(),
+  }),
 ]);
 export type CreateScenarioBody = z.infer<typeof CreateScenarioBody>;
 
@@ -87,6 +93,7 @@ export const UpdateScenarioMetaBody = z.object({ isTemplate: z.boolean().optiona
 export const GalleryListBody = z.object({ listed: z.boolean() });
 
 export const AssistantBody = z.object({ instruction: z.string().trim().min(3).max(4000) });
+export const AssistantListQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) });
 export const ApplyProposalBody = z
   .object({ paths: z.array(z.enum(EDITABLE_FIELD_PATHS)).min(1).max(EDITABLE_FIELD_PATHS.length).optional() })
   .default({});

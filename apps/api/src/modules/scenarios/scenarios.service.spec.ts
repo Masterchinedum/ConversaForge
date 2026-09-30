@@ -10,7 +10,7 @@ import { defaultScenarioConfig, SCENARIO_TEMPLATES, type ScenarioConfig } from '
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { SimulatorProvider } from '../../common/llm/simulator.provider';
 import type { Principal } from '../../common/auth/principal';
-import { DraftAssistantService, sanitizeProposal } from './draft-assistant.service';
+import { creatorWrittenPaths, DraftAssistantService, sanitizeProposal } from './draft-assistant.service';
 import { GalleryService } from './gallery.service';
 import { ScenariosService } from './scenarios.service';
 
@@ -364,6 +364,157 @@ describe('drafting assistant', () => {
     await expectCode(assistant.apply(ws1, p1, d.scenario.id, prop.id), 409, 'locked');
     const rej = await assistant.reject(ws1, d.scenario.id, prop.id);
     expect(rej.status).toBe('REJECTED');
+  });
+});
+
+describe('Scenario Studio', () => {
+  const interviewBrief =
+    'A 20-minute behavioral interview for a senior product manager role. Ask about their leadership experience. Never ask about salary.';
+
+  it('creates an unpublished studio draft from nothing but the creator’s first edits', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio', config: { basics: { name: 'Studio start' } }, lockedFields: ['basics.name'] });
+    expect(d.scenario.status).toBe('DRAFT');
+    expect(d.latestVersion).toBeNull();
+    expect(d.draft.lockedFields).toEqual(['basics.name']);
+    expect((d.draft.config as ScenarioConfig).basics.name).toBe('Studio start');
+    const blank = await scenarios.create(ws1, p1, { source: 'studio' });
+    expect(blank.scenario.name).toBe('Untitled scenario');
+    await expectCode(scenarios.create(ws1, p1, { source: 'studio', config: { basics: { targetDurationMinutes: 'long' } } }), 422);
+  });
+
+  it('runs the creator journey: brief → manual edits + lock → targeted follow-up → v1 → v2, sessions keep v1', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const id = d.scenario.id;
+
+    // 1. One natural-language brief produces a coherent, publishable draft.
+    const first = await assistant.propose(ws1, p1, id, interviewBrief);
+    expect(first.reply).toMatch(/drafted a 20-minute/i);
+    const paths = first.changes.map((c) => c.path);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        'basics.name',
+        'basics.publicDescription',
+        'basics.participantInstructions',
+        'instructions.aiInstructions',
+        'conversation.agenda',
+        'rubric',
+        'basics.targetDurationMinutes',
+      ]),
+    );
+    const agenda = first.changes.find((c) => c.path === 'conversation.agenda')!.after as ScenarioConfig['conversation']['agenda'];
+    expect(agenda.some((a) => /leadership experience/i.test(a.topic))).toBe(true);
+    expect(first.changes.find((c) => c.path === 'instructions.boundaries')!.after).toEqual(expect.arrayContaining(['Never ask about salary']));
+    const applied = await assistant.apply(ws1, p1, id, first.id);
+    let cfg = applied.scenario.draft.config as ScenarioConfig;
+    expect(cfg.conversation.strategy).toBe('adaptive');
+    expect(applied.scenario.issues.filter((i) => i.severity === 'error')).toEqual([]);
+
+    // 2. Two manual edits and one lock.
+    const manualInstructions = 'You will meet Priya, a hiring manager. Take your time; this is practice.';
+    let cur = await scenarios.updateDraft(ws1, p1, id, {
+      revision: applied.scenario.draft.revision,
+      patch: [
+        { path: 'basics.participantInstructions', value: manualInstructions },
+        { path: 'persona.name', value: 'Priya' },
+      ],
+      lockedFields: ['basics.name'],
+    });
+    const nameBefore = (cur.draft.config as ScenarioConfig).basics.name;
+
+    // 3. A targeted follow-up: only duration and dependent timing change.
+    const follow = await assistant.propose(ws1, p1, id, 'Make it 15 minutes');
+    const fpaths = follow.changes.map((c) => c.path).sort();
+    expect(fpaths).toEqual(expect.arrayContaining(['basics.targetDurationMinutes', 'conversation.ending']));
+    for (const p of ['basics.name', 'basics.participantInstructions', 'persona.name', 'rubric', 'conversation.agenda']) expect(fpaths).not.toContain(p);
+    expect(follow.changes.find((c) => c.path === 'basics.targetDurationMinutes')!.after).toBe(15);
+    // AI-written prose that mentioned the old duration follows it; the creator's text is reported, not rewritten.
+    const ft = follow.changes.find((c) => c.path === 'conversation.firstTurn');
+    if (ft) expect((ft.after as { text: string }).text).toMatch(/15 minutes/);
+    expect(follow.preserved).toEqual(expect.arrayContaining([{ path: 'basics.name', reason: 'locked' }, { path: 'basics.participantInstructions', reason: 'creator' }]));
+    expect(follow.reply).toMatch(/Name/);
+    const r2 = await assistant.apply(ws1, p1, id, follow.id);
+    cfg = r2.scenario.draft.config as ScenarioConfig;
+    expect(cfg.basics.targetDurationMinutes).toBe(15);
+    expect(cfg.basics.name).toBe(nameBefore);
+    expect(cfg.basics.participantInstructions).toBe(manualInstructions);
+    expect(cfg.persona.name).toBe('Priya');
+    expect(cfg.conversation.ending.maxDurationMinutes).toBeGreaterThanOrEqual(15);
+
+    // 4. The conversation survives a reload (newest first) with replies and fields left alone.
+    const history = await assistant.list(ws1, id, 50);
+    expect(history.data.map((h) => h.instruction)).toEqual(['Make it 15 minutes', interviewBrief]);
+    expect(history.data[0]!.reply).toBeTruthy();
+    expect(history.data[0]!.status).toBe('APPLIED');
+
+    // 5. Create Scenario = publish v1; a session pins v1.
+    const v1 = await scenarios.publish(ws1, p1, id, { changeNote: 'Created in Scenario Studio', revision: r2.scenario.draft.revision });
+    expect(v1.version.version).toBe(1);
+    const participant = await prisma.participant.create({ data: { workspaceId: ws1, name: 'Pat', email: `pat-${run}@example.com` } });
+    const session = await prisma.session.create({ data: { workspaceId: ws1, scenarioId: id, scenarioVersionId: v1.version.id, participantId: participant.id } });
+
+    // 6. Later AI-assisted edit → v2; the v1 session still runs v1.
+    const tweak = await assistant.propose(ws1, p1, id, 'Add a question about stakeholder management');
+    expect(tweak.changes.map((c) => c.path)).toEqual(['conversation.agenda']);
+    await assistant.apply(ws1, p1, id, tweak.id);
+    const v2 = await scenarios.publish(ws1, p1, id, { changeNote: 'More topics' });
+    expect(v2.version.version).toBe(2);
+    const pinned = await prisma.session.findUniqueOrThrow({ where: { id: session.id } });
+    expect(pinned.scenarioVersionId).toBe(v1.version.id);
+    const run1 = await scenarios.getRunnableVersion(ws1, id, pinned.scenarioVersionId);
+    expect(run1.version.version).toBe(1);
+    expect(run1.config.conversation.agenda.some((a) => /stakeholder/i.test(a.topic))).toBe(false);
+  });
+
+  it('never touches locked fields, even when asked to regenerate everything', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const p = await assistant.propose(ws1, p1, d.scenario.id, 'a 10-minute sales discovery call with a busy VP about our CRM');
+    const a = await assistant.apply(ws1, p1, d.scenario.id, p.id);
+    const before = a.scenario.draft.config as ScenarioConfig;
+    await scenarios.updateDraft(ws1, p1, d.scenario.id, { revision: a.scenario.draft.revision, lockedFields: ['rubric', 'persona.role', 'conversation.agenda'] });
+    const regen = await assistant.propose(ws1, p1, d.scenario.id, 'Regenerate the whole scenario: turn it into a negotiation with a tough procurement lead, new rubric, new agenda');
+    for (const c of regen.changes) expect(['rubric', 'persona.role', 'conversation.agenda']).not.toContain(c.path);
+    if (regen.changes.length) {
+      const r = await assistant.apply(ws1, p1, d.scenario.id, regen.id);
+      const after = r.scenario.draft.config as ScenarioConfig;
+      expect(after.rubric).toEqual(before.rubric);
+      expect(after.persona.role).toBe(before.persona.role);
+      expect(after.conversation.agenda).toEqual(before.conversation.agenda);
+    }
+    expect(regen.reply).toMatch(/locked/);
+  });
+
+  it('reports requests the runtime cannot deliver and never enables a planned tool', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const p = await assistant.propose(ws1, p1, d.scenario.id, 'A product demo that presents slides, uses a whiteboard, and emails the visitor a summary afterwards');
+    expect(p.unsupported.map((u) => u.request)).toEqual(expect.arrayContaining(['Present slides', 'Send emails or messages']));
+    const tools = p.changes.find((c) => c.path === 'tools')!.after as ScenarioConfig['tools'];
+    const on = tools.enabled.filter((t) => t.enabled).map((t) => t.toolId);
+    expect(on).toContain('whiteboard');
+    expect(on).not.toContain('slides');
+    expect(p.reply).toMatch(/not something the runtime can do/);
+
+    // Model output that tries to switch on a planned tool is stripped before it is stored.
+    const current = defaultScenarioConfig();
+    const s = sanitizeProposal(
+      { changes: [{ path: 'tools', valueJson: JSON.stringify({ enabled: [{ toolId: 'end_session', enabled: true }, { toolId: 'slides', enabled: true }, { toolId: 'timer', enabled: true }] }), reason: 'x' }] },
+      current,
+      [],
+    );
+    const stored = s.changes[0]!.after as ScenarioConfig['tools'];
+    expect(stored.enabled.map((t) => t.toolId)).toEqual(['end_session', 'timer']);
+    expect(s.unsupported[0]!.request).toMatch(/Slides/);
+  });
+
+  it('knows which fields hold the creator’s own wording', () => {
+    const cfg = defaultScenarioConfig({ basics: { name: 'Mine', publicDescription: 'AI wrote this' }, instructions: { tone: 'AI tone' } });
+    const applied = [
+      { changes: [{ path: 'basics.publicDescription', before: '', after: 'AI wrote this', reason: '' }, { path: 'instructions.tone', before: '', after: 'older AI tone', reason: '' }], appliedPaths: ['basics.publicDescription', 'instructions.tone'] },
+    ];
+    const manual = creatorWrittenPaths(cfg, applied);
+    expect(manual.has('basics.name')).toBe(true); // typed by the creator
+    expect(manual.has('basics.publicDescription')).toBe(false); // still the assistant's text
+    expect(manual.has('instructions.tone')).toBe(true); // the assistant's text, since edited by the creator
+    expect(manual.has('rubric')).toBe(false); // default
   });
 });
 

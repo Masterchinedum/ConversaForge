@@ -213,6 +213,14 @@ export class ScenariosService {
         if (!config.basics.name.trim()) config.basics.name = 'Imported scenario';
         break;
       }
+      case 'studio': {
+        // Stored permissively like any draft edit: incomplete is fine, structurally invalid is a 422.
+        const parsed = parseScenarioConfig(body.config !== undefined ? scrubData(body.config) : {});
+        if (!parsed.success) throw Errors.validation('The draft has invalid values', zodIssuesToDetails(parsed.error.issues));
+        config = parsed.data;
+        lockedFields = Array.from(new Set(body.lockedFields ?? []));
+        break;
+      }
       case 'duplicate': {
         const src = await this.findScenario(workspaceId, body.scenarioId);
         let raw: unknown;

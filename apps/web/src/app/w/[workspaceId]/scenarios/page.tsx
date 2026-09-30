@@ -7,7 +7,7 @@ import { PRIVACY, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type ScenarioType } from
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';
-import { Badge, Button, ConfirmButton, EmptyState, ErrorState, Input, Loading, PageHeader, Select, Table, Td, Th, useToast } from '@/components/ui';
+import { Badge, Button, ButtonLink, ConfirmButton, EmptyState, ErrorState, Input, Loading, PageHeader, Select, Table, Td, Th, useToast } from '@/components/ui';
 import { NewScenarioModal } from '@/components/scenarios/new-scenario';
 import { StatusBadge } from '@/components/scenarios/status-badge';
 import type { ScenarioDetail, ScenarioRow } from '@/components/scenarios/types';
@@ -55,9 +55,14 @@ export default function ScenarioLibraryPage() {
         title="Scenarios"
         description="Configure AI conversation agents. Drafts are private until published; every publish creates an immutable version."
         actions={
-          <Button onClick={() => setShowNew(true)} data-testid="new-scenario">
-            New scenario
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setShowNew(true)} data-testid="new-scenario">
+              Template or import
+            </Button>
+            <ButtonLink href={href('/scenarios/new')} data-testid="create-scenario">
+              Create scenario
+            </ButtonLink>
+          </>
         }
       />
       <div className="mb-4 flex flex-wrap gap-2">
@@ -93,8 +98,15 @@ export default function ScenarioLibraryPage() {
       ) : !rows.length ? (
         <EmptyState
           title={debounced || type || status || privacy ? 'No matching scenarios' : 'No scenarios yet'}
-          description="Start from a template, a blank scenario, or import a YAML file."
-          action={<Button onClick={() => setShowNew(true)}>New scenario</Button>}
+          description="Describe what you want in Scenario Studio and the AI drafts it with you, or start from a template or a YAML file."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <ButtonLink href={href('/scenarios/new')}>Create scenario</ButtonLink>
+              <Button variant="secondary" onClick={() => setShowNew(true)}>
+                Template or import
+              </Button>
+            </div>
+          }
         />
       ) : (
         <>

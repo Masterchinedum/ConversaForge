@@ -1,10 +1,44 @@
 'use client';
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { EDITABLE_FIELD_PATHS } from '@cf/shared';
+import { EDITABLE_FIELD_PATHS, FIELD_AUDIENCE, type EditableFieldPath } from '@cf/shared';
 import { Button, Checkbox, Input, Select, Textarea, clsx } from '@/components/ui';
 import { fieldDomId, issuesFor, useEditor, useField } from './editor-context';
 
 const LOCKABLE = new Set<string>(EDITABLE_FIELD_PATHS);
+
+const AUDIENCE: Record<string, { label: string; title: string; className: string }> = {
+  participant: { label: 'Participant sees', title: 'Shown to participants', className: 'bg-sky-50 text-sky-800' },
+  private: { label: 'Private to AI', title: 'Only the AI sees this; never shown to participants', className: 'bg-slate-100 text-slate-700' },
+  scoring: { label: 'Private scoring', title: 'Used to evaluate the session; not shown to participants verbatim', className: 'bg-violet-50 text-violet-800' },
+};
+
+/** Who sees a field: participant-facing, private AI instructions, or private scoring. */
+export function AudienceBadge({ path }: { path: string }) {
+  const kind = FIELD_AUDIENCE[path as EditableFieldPath];
+  if (!kind) return null;
+  const a = AUDIENCE[kind]!;
+  return (
+    <span className={clsx('ml-2 inline-flex rounded px-1.5 py-0.5 align-middle text-[10px] font-medium', a.className)} title={a.title}>
+      {a.label}
+    </span>
+  );
+}
+
+/** Scenario Studio marker: the assistant suggests a change here (pending) or just changed it. */
+function AiMark({ path }: { path: string }) {
+  const { aiMark } = useEditor();
+  const mark = aiMark?.(path);
+  if (!mark) return null;
+  return (
+    <span
+      data-testid={`ai-mark-${path}`}
+      className={clsx('rounded px-1.5 py-0.5 text-[10px] font-medium', mark === 'pending' ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-100 text-emerald-800')}
+      title={mark === 'pending' ? 'The assistant suggests a change here (see the conversation)' : 'Updated by the assistant'}
+    >
+      {mark === 'pending' ? 'AI suggestion' : 'AI updated'}
+    </span>
+  );
+}
 
 /** Lock toggle: locked fields are never changed by the drafting assistant. */
 export function LockButton({ path }: { path: string }) {
@@ -12,6 +46,8 @@ export function LockButton({ path }: { path: string }) {
   if (!LOCKABLE.has(path)) return null;
   const locked = lockedFields.includes(path);
   return (
+    <span className="inline-flex items-center gap-1">
+    <AiMark path={path} />
     <button
       type="button"
       onClick={() => toggleLock(path)}
@@ -27,6 +63,7 @@ export function LockButton({ path }: { path: string }) {
     >
       {locked ? '🔒' : '🔓'}
     </button>
+    </span>
   );
 }
 
@@ -56,6 +93,7 @@ export function FieldRow({
         <label htmlFor={id} className="block text-sm font-medium text-slate-700">
           {label}
           {required && <span className="ml-0.5 text-red-600" aria-hidden>*</span>}
+          <AudienceBadge path={path} />
         </label>
         <LockButton path={path} />
       </div>

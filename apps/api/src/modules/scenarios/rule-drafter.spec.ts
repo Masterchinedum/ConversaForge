@@ -46,4 +46,76 @@ describe('rule-based drafter (simulator)', () => {
     expect(rubric.changes.map((c) => c.path)).toEqual(['rubric']);
     expect(ruleBasedDraft('rewrite the rubric', tpl, ['rubric']).changes).toEqual([]);
   });
+
+  describe('follow-up edits (Scenario Studio)', () => {
+    const drafted = () => {
+      const base = defaultScenarioConfig({ basics: { name: '' } });
+      return apply(base, ruleBasedDraft('a 10-minute behavioral interview for a data analyst role', base, []).changes);
+    };
+
+    it('"make it 15 minutes" changes duration and dependent timing only', () => {
+      const cfg = drafted();
+      cfg.conversation.timedInstructions = [{ id: 't1', atSecond: 480, action: 'wrap_up', instruction: 'Start wrapping up' }];
+      const r = ruleBasedDraft('Make it 15 minutes', cfg, [], { manualPaths: new Set() });
+      const paths = r.changes.map((c) => c.path).sort();
+      expect(paths).toEqual(
+        ['basics.participantInstructions', 'basics.publicDescription', 'basics.targetDurationMinutes', 'conversation.ending', 'conversation.firstTurn', 'conversation.timedInstructions'].sort(),
+      );
+      const next = apply(cfg, r.changes);
+      expect(next.basics.targetDurationMinutes).toBe(15);
+      expect(next.conversation.firstTurn.text).toMatch(/15 minutes/);
+      expect(next.conversation.timedInstructions[0]!.atSecond).toBe(720);
+      expect(next.conversation.ending.maxDurationMinutes).toBeGreaterThanOrEqual(15);
+      expect(validateScenarioForPublish(next).issues.filter((i) => i.severity === 'error')).toEqual([]);
+      expect(r.reply).toMatch(/Everything else is unchanged/);
+    });
+
+    it('keeps the creator’s wording and says so', () => {
+      const cfg = drafted();
+      const r = ruleBasedDraft('Make it 15 minutes', cfg, [], { manualPaths: new Set(['basics.participantInstructions']) });
+      expect(r.changes.map((c) => c.path)).not.toContain('basics.participantInstructions');
+      expect(r.reply).toMatch(/Participant instructions still mentions 10 minutes/);
+    });
+
+    it('appends an agenda topic instead of regenerating the agenda, and does not change the type', () => {
+      const cfg = drafted();
+      const r = ruleBasedDraft('Also ask about their experience with SQL and dashboards', cfg, [], { manualPaths: new Set() });
+      expect(r.changes.map((c) => c.path)).toEqual(['conversation.agenda']);
+      const agenda = r.changes[0]!.value as ScenarioConfig['conversation']['agenda'];
+      expect(agenda.length).toBe(cfg.conversation.agenda.length + 1);
+      expect(agenda.slice(0, -2)).toEqual(cfg.conversation.agenda.slice(0, -1));
+      expect(agenda.some((a) => /SQL and dashboards/.test(a.topic))).toBe(true);
+    });
+
+    it('renames, switches to fixed questions only on request, and keeps adaptive by default', () => {
+      const cfg = drafted();
+      expect(cfg.conversation.strategy).toBe('adaptive');
+      expect(ruleBasedDraft('Call it "Analyst screen"', cfg, []).changes).toEqual([expect.objectContaining({ path: 'basics.name', value: 'Analyst screen' })]);
+      const fixed = ruleBasedDraft('Use a fixed set of questions asked verbatim', cfg, []);
+      const next = apply(cfg, fixed.changes);
+      expect(next.conversation.strategy).toBe('fixed_questions');
+      expect(validateScenarioForPublish(next).issues.filter((i) => i.severity === 'error')).toEqual([]);
+    });
+
+    it('enables supported tools and reports unsupported capabilities without faking them', () => {
+      const cfg = drafted();
+      const r = ruleBasedDraft('Add a timer and let them upload their resume. Also share their screen and send them an email afterwards.', cfg, []);
+      const tools = r.changes.find((c) => c.path === 'tools')!.value as ScenarioConfig['tools'];
+      expect(tools.enabled.map((t) => t.toolId)).toEqual(expect.arrayContaining(['end_session', 'timer', 'document_upload']));
+      expect(r.unsupported.map((u) => u.request)).toEqual(['See or capture the participant’s screen', 'Send emails or messages']);
+      expect(ruleBasedDraft('Add a timer', cfg, ['tools']).changes).toEqual([]);
+    });
+
+    it('reads the role from "for a … role" and treats "ask about …" as an agenda topic', () => {
+      const r = ruleBasedDraft('A 20-minute behavioral interview for a senior product manager role. Ask about stakeholder management.', defaultScenarioConfig(), []);
+      const get = (p: string) => r.changes.find((c) => c.path === p)!.value;
+      expect(get('basics.name')).toBe('Behavioral interview for the senior product manager role');
+      expect((get('conversation.agenda') as ScenarioConfig['conversation']['agenda']).map((a) => a.topic)).toContain('Stakeholder management');
+    });
+
+    it('asks open questions when a first brief leaves things out', () => {
+      const r = ruleBasedDraft('something to practice with', defaultScenarioConfig(), []);
+      expect(r.questions.length).toBeGreaterThan(0);
+    });
+  });
 });

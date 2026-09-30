@@ -60,10 +60,18 @@ export interface DiffResponse {
 
 export interface Proposal {
   id: string;
+  /** The creator's message. */
   instruction: string;
-  changes: Array<{ path: string; before: unknown; after: unknown; reason: string }>;
+  /** The assistant's reply (Scenario Studio conversation). */
+  reply: string;
+  questions: string[];
+  /** Requests the runtime cannot deliver. */
+  unsupported: Array<{ request: string; reason: string }>;
+  /** Fields deliberately left alone. */
+  preserved: Array<{ path: string; reason: 'locked' | 'creator' }>;
+  changes: Array<{ path: string; before: unknown; after: unknown; reason: string; overwritesManual?: boolean }>;
   dropped: Array<{ path: string; reason: string }>;
-  status: 'PENDING' | 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'STALE';
+  status: 'PENDING' | 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'STALE' | 'NO_CHANGES';
   appliedPaths: string[];
   provider: string | null;
   model: string | null;

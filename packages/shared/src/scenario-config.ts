@@ -669,6 +669,74 @@ export const EDITABLE_FIELD_PATHS = [
 ] as const;
 export type EditableFieldPath = (typeof EDITABLE_FIELD_PATHS)[number];
 
+/** Human-readable names of the editable fields (assistant replies, change lists, locks). */
+export const FIELD_LABELS: Record<EditableFieldPath, string> = {
+  'basics.name': 'Name',
+  'basics.type': 'Type',
+  'basics.internalDescription': 'Internal description',
+  'basics.publicDescription': 'Public description',
+  'basics.participantInstructions': 'Participant instructions',
+  'basics.language': 'Language',
+  'basics.targetDurationMinutes': 'Target duration',
+  'basics.privacy': 'Privacy',
+  'basics.tags': 'Tags',
+  'persona.role': 'AI role',
+  'persona.name': 'Persona name',
+  'persona.description': 'Persona description',
+  'persona.voice': 'Voice',
+  'persona.avatar': 'Avatar',
+  'instructions.aiInstructions': 'AI instructions',
+  'instructions.goals': 'Objectives',
+  'instructions.boundaries': 'Boundaries',
+  'instructions.tone': 'Tone',
+  'instructions.verbosity': 'Verbosity',
+  'conversation.strategy': 'Follow-up strategy',
+  'conversation.agenda': 'Agenda',
+  'conversation.firstTurn': 'First turn',
+  'conversation.ending': 'Ending rules',
+  'conversation.turnTaking': 'Turn-taking',
+  'conversation.timedInstructions': 'Timed instructions',
+  model: 'Model & voice providers',
+  audio: 'Audio controls',
+  recording: 'Recording & consent',
+  analysis: 'Analysis & visibility',
+  rubric: 'Feedback rubric',
+  'extraction.variables': 'Data to extract',
+  'variables.allowlist': 'Runtime variables',
+  memory: 'Learner memory',
+  coach: 'Coach mode',
+  tools: 'Tools',
+  knowledge: 'Knowledge',
+  channels: 'Channels',
+  access: 'Access defaults',
+};
+
+/**
+ * Who sees a field: participant-facing text is shown before/during the session; private fields only
+ * reach the AI; scoring fields are used after the session and never shown verbatim to participants.
+ */
+export const FIELD_AUDIENCE: Partial<Record<EditableFieldPath, 'participant' | 'private' | 'scoring'>> = {
+  'basics.name': 'participant',
+  'basics.publicDescription': 'participant',
+  'basics.participantInstructions': 'participant',
+  'conversation.firstTurn': 'participant',
+  'persona.name': 'participant',
+  'basics.internalDescription': 'private',
+  'persona.role': 'private',
+  'persona.description': 'private',
+  'instructions.aiInstructions': 'private',
+  'instructions.goals': 'private',
+  'instructions.boundaries': 'private',
+  'conversation.agenda': 'private',
+  'conversation.timedInstructions': 'private',
+  rubric: 'scoring',
+  'extraction.variables': 'scoring',
+};
+
+export function fieldLabel(path: string): string {
+  return (FIELD_LABELS as Record<string, string>)[path] ?? path;
+}
+
 export interface FieldChange {
   path: string;
   before: unknown;

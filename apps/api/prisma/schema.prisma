@@ -394,6 +394,13 @@ model DraftAssistantProposal {
   simulated     Boolean   @default(false) // produced by the local simulator (rule-based drafter)
   // [{ path, reason }] — proposed changes that were stripped (locked/unknown path, invalid value)
   dropped       Json      @default("[]")
+  // Scenario Studio conversation: the assistant's reply to `instruction` (the creator's message),
+  // open questions, requests the runtime cannot deliver [{ request, reason }], and fields it
+  // deliberately left alone [{ path, reason }] (locked or written by the creator).
+  reply         String    @default("")
+  questions     String[]  @default([])
+  unsupported   Json      @default("[]")
+  preserved     Json      @default("[]")
   createdById   String?
   createdAt     DateTime  @default(now())
   resolvedAt    DateTime?
