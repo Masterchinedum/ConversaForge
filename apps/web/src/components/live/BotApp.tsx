@@ -47,7 +47,9 @@ export function BotApp({ sessionId }: { sessionId: string }) {
         if (cancelled) return;
         setBoot(b);
         if (isTerminal(b.state)) return setPhase({ k: 'ended', state: b.state });
-        const d = await meetingDevices();
+        const d = await meetingDevices().catch((e) => {
+          throw new Error(`Could not hear the meeting (${(e as Error)?.message || 'no audio input'}). This page only works inside the meeting bot.`);
+        });
         if (cancelled) return release(d);
         setDevices(d);
         // Page reloaded mid-call: rejoin at once instead of waiting for speech.
