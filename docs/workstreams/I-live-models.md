@@ -78,17 +78,12 @@ Never the real key, the instructions or the tool list. `SessionEvent provider.re
   16 kHz → PCM16 LE base64 → `sendRealtimeInput({ audio: { data, mimeType:'audio/pcm;rate=16000' } })`; only
   while listening (not muted/paused, push-to-talk held). Mute/pause/PTT release/"I'm done" →
   `sendRealtimeInput({ audioStreamEnd: true })`.
-- **Echo gate** (`mic-gate.ts`, `MicGate`): while the agent is audible (+300 ms hangover) mic chunks are *not*
-  sent — through speakers the agent's own voice came back into the mic and Gemini's activity detection
-  treated it as the participant interrupting (the agent stopped mid-sentence, then answered its own echo and
-  repeated the greeting). The local energy VAD (raised threshold + 300 ms confirmation while the agent
-  plays) opens the gate when the participant really talks; the last ≤500 ms of withheld audio (pre-roll)
-  is sent first so the first syllable is kept, the agent is **ducked** (−12 dB) at once and, if the
-  participant keeps talking for 1.2 s over a turn the model had already finished, playback is **cut** and
-  the saved turn is updated with what was heard (`interrupted:true`). When the participant stops while the
-  agent is still talking (no `interrupted` came back) → `audioStreamEnd`, so Gemini closes that activity.
-  When the agent finishes, the pre-roll is only kept if energy was already rising (a quick overlapping
-  reply); otherwise it is echo and dropped. Push-to-talk held always streams.
+- The mic streams **continuously** (Google's reference setup): the browser's echo canceller keeps the
+  agent's voice out, Gemini's activity detection (default start-of-speech sensitivity) decides turns and
+  barge-in (`interrupted` → playback stops). The local energy VAD only drives the level meter and the
+  `speaking` signal (indicator, server instruction timing, silence check-in). An echo gate + local
+  turn-taking layer (pre-roll, ducking, tail cut, `START_SENSITIVITY_LOW`) existed from 2026-09-27 and was
+  removed on 2026-09-30 — see "Plain audio experiment" below.
 - Model audio (`serverContent.modelTurn.parts[].inlineData`, `audio/pcm;rate=24000`) → the shared
   `AudioPlayer` (WebAudio → speakers **and** the recording mix), `agentSpeaking` from audibility. The
   player treats the chunks as one stream: PCM is resampled to the AudioContext rate by a resampler that
@@ -97,8 +92,7 @@ Never the real key, the instructions or the tool list. `SessionEvent provider.re
   turn starts and before resuming after an underrun — the cushion grows by 150 ms per underrun (up to 1 s)
   because a live model's first seconds can arrive slower than real time — audio is held at most 1.2 s after
   the last chunk if the stream stops, the end of a turn flushes early, successive turns queue back to back
-  instead of cutting each other off, stops fade over 20 ms, and `duck()` lowers the agent while the
-  participant starts talking. `getStats()` (underruns, buffers, cushion) is exposed through `debugState()`.
+  instead of cutting each other off, and stops fade over 20 ms. `getStats()` (underruns, buffers, cushion) is exposed through `debugState()`.
 - Transcripts: `inputTranscription` → participant item (`interimInputTranscription`, when the model sends
   it, only updates the caption), `outputTranscription` → agent item; `cleanTranscript()` strips Gemini's
   non-speech placeholders (`<no speech>`, `{pause}`, `<noise>`, also while they arrive in pieces) and
@@ -150,7 +144,7 @@ interrupted, one transcript row; without echo the same (5.6 s run). Before the c
 greeting came out in 4 fragments with 3 underruns, and Gemini's silent-mic "`<no speech>{pause}`" turns
 showed as agent rows.
 
-Tests: `apps/web/e2e/unit.spec.ts` (resampler continuity and ratio, mic gate, VAD `aboveMs`, echo warm-up,
+Tests: `apps/web/e2e/unit.spec.ts` (resampler continuity and ratio, VAD `aboveMs`, echo warm-up,
 transcript cleaning, store dedupe with `rt_` ids), `apps/web/e2e/gemini-live.spec.ts` (same protocol expectations against the new
 adapter; the session-socket proxy now also drops the real session's own `realtime.instruction` /
 `realtime.tool_result` messages, since seeded scenarios run live voice by default, and token requests
@@ -174,30 +168,24 @@ constant interrupting. Parts of the participant's English came back as Spanish.
 | Agent answers as soon as the participant pauses | Gemini's activity detection is silence-only (no semantic "unfinished sentence" check like OpenAI's semantic VAD); the default 1200 ms end-of-turn silence is short for thinking | `silenceDurationMs = endOfTurnSilenceMs + GEMINI_THINKING_PAD_MS` (800 ms, capped at 3000) → 2 s by default |
 | English transcribed as Spanish | `inputAudioTranscription: {}` = per-utterance language auto-detection | `inputAudioTranscription.languageCodes = [basics.language]` (SDK 2.24 `AudioTranscriptionConfig.languageCodes`, accepted by the constrained endpoint) |
 
-### Plain audio experiment (`?audio=plain`, 2026-09-30)
-Question behind it: is our browser turn-taking layer (echo gate, local VAD deciding what Gemini hears,
-ducking, tail cut, `START_SENSITIVITY_LOW`) helping, or fighting Gemini's own activity detection? Plain audio
-is Google's reference setup: the mic streams continuously with the browser's echo cancellation only, and
-Gemini alone decides turns and barge-in (`interrupted`).
+### Plain audio experiment → managed layer removed (2026-09-30)
+Question: was the browser turn-taking layer (echo gate, local VAD deciding what Gemini hears, ducking, tail
+cut, `START_SENSITIVITY_LOW`) helping, or fighting Gemini's own activity detection? For an A/B test a
+Managed/Plain switch was added (plain = Google's reference setup: continuous mic, browser echo cancellation
+only, Gemini decides turns and barge-in). The user compared both on real calls (headphones and speakers,
+Mac) and noticed no difference. Cost is the same too: measured against the real API, 20 s of streamed quiet
+mic audio added no audio tokens to the context (Gemini discards non-speech); what grows the prompt is the
+conversation itself, re-counted every turn. So plain became the only mode and the managed layer was
+deleted (`mic-gate.ts`, gating/pre-roll/tail cut in `gemini-live.ts`, `AudioPlayer.duck()`, the switch and
+the `plainAudio` token flag). Still in place: the playback jitter buffer, holding client content while the
+model is busy, silent `update_progress`, the transcription language hint.
 
-- Switch: "Audio handling" (Managed / Plain) on the device-check screen, shown only for Gemini Live on
-  sessions this browser started with ▶ Try it (`cf:selftest:<id>`, set by `startSelfRun`) or when plain is
-  already on — participants' links never see it. `?audio=plain|managed` on the live page still works. The
-  choice is remembered in that browser (`localStorage['cf.liveAudioMode']`); the call screen shows
-  "Google Gemini Live (plain audio)". Code: `apps/web/src/lib/voice/audio-mode.ts`, `GeminiLiveAdapter.plain`.
-  (The first URL-only version was never actually used in the user's tests: every token event said
-  `plainAudio: false`.)
-- Token: `POST …/realtime-token { plainAudio: true }` → no `startOfSpeechSensitivity` (Google's default);
-  end-of-turn settings unchanged. Logged on the `provider.realtime_token` session event (`plainAudio`).
-- Kept in both modes: the playback jitter buffer (audio quality, not turn-taking), holding client-content
-  instructions while the model is busy (client content interrupts generation — protocol behaviour), silent
-  `update_progress`, transcription language.
-- What to compare (headphones, then laptop speakers): does the agent cut itself off or answer its own voice
-  (echo), does it stop promptly when you talk over it, does it wait through thinking pauses. If plain holds
-  up on speakers, the managed layer (`mic-gate.ts`, gating in `gemini-live.ts`) can be deleted.
-- Tests: `live-providers.spec.ts` + `runtime.e2e.spec.ts` (token setup), `e2e/gemini-live.spec.ts` "plain audio"
-  (mic keeps streaming while the agent plays; `interrupted` stops playback; the choice persists). and "device
-  check: the audio switch…" (hidden on a participant link; Plain on your own call reaches the token request).
+Known trade-offs: (1) there is no echo defence beyond the browser's echo canceller; a mic with echo
+cancellation turned off (scenario audio setting) on speakers lets the agent hear itself (the adapter logs
+a warning), and `e2e/gemini-real.spec.ts` with `E2E_ECHO > 0` (synthetic echo that bypasses echo
+cancellation) is expected to fail. (2) Gemini reports `interrupted` only while it is still generating; audio
+already buffered after `turnComplete` (little — Gemini streams near real time) is not stopped by talking over
+it. Retest on a Windows laptop / phone speaker if users report the agent cutting itself off.
 
 ### Silence check-in in live voice (2026-09-30)
 Before: the check-in existed only in the pipeline (`!this.realtime` in `tick()`), and the live models never
@@ -211,8 +199,8 @@ speak unprompted — a silent participant got no reaction until the wrap-up near
   silence (logged `silence.check_in`); speech resets it.
 - `cancelOnSpeech` (additive protocol field): the Gemini adapter drops a queued check-in when the
   participant speaks or is transcribed before the model is free to take it. OpenAI adds it immediately.
-- Tests: `runtime.e2e.spec.ts` "realtime mode: silence check-in…", `e2e/gemini-live.spec.ts` plain-audio test
-  (a queued check-in is dropped on speech; an unqueued one is sent with `turnComplete: true`).
+- Tests: `runtime.e2e.spec.ts` "realtime mode: silence check-in…", `e2e/gemini-live.spec.ts` "mic streams while
+  the agent plays…" (a queued check-in is dropped on speech; an unqueued one is sent with `turnComplete: true`).
 
 ## API facts verified (and where)
 All from `node_modules/@google/genai` **2.24.0** (`dist/genai.d.ts`, `dist/node/index.cjs`, `dist/web/index.mjs`)

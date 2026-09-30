@@ -10,7 +10,6 @@ import { wsUrl } from '../api';
 import {
   createVoiceClient,
   detectCapabilities,
-  liveAudioMode,
   planVoice,
   unavailableKeyFor,
   voiceLabel as labelFor,
@@ -115,7 +114,6 @@ export function useLiveCall(o: UseLiveCallOptions) {
           serverTts: plan.output === 'server',
           speakInTypedMode: plan.output !== 'none',
           sessionStartedAt: () => startedAtRef.current,
-          liveAudio: liveAudioMode(),
         },
         { agentSpeaksFirst },
       );

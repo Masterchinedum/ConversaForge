@@ -91,8 +91,10 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(setup.outputAudioTranscription).toEqual({});
     expect(setup.realtimeInputConfig).toMatchObject({
       activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-      automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW', endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 + GEMINI_THINKING_PAD_MS },
+      automaticActivityDetection: { endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 + GEMINI_THINKING_PAD_MS },
     });
+    // Start of speech: Google's default (the browser streams the mic continuously, echo cancellation on).
+    expect(setup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBeUndefined();
     expect(setup.sessionResumption).toEqual({});
     expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });
 
@@ -125,14 +127,6 @@ describe('Gemini Live token minting (mock Gemini API)', () => {
     expect(setup.generationConfig.speechConfig).toEqual({ voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } }, languageCode: 'en-US' });
     expect(setup.tools).toBeUndefined();
     expect(creds).toMatchObject({ resumed: true, connectConfig: { sessionResumption: { handle: 'handle-XYZ' } } });
-  });
-
-  it('plain audio keeps Google\'s default start-of-speech sensitivity (the browser does not gate the mic)', async () => {
-    const svc = new RealtimeService(fakeLlm({ google: { secret: 'k' } }));
-    await svc.mint({ workspaceId: 'ws', provider: 'google', model: '', instructions: 'I', tools: [], config: cfg(), plainAudio: true });
-    const aad = requests[0]!.body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection;
-    expect(aad.startOfSpeechSensitivity).toBeUndefined();
-    expect(aad).toMatchObject({ endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', silenceDurationMs: 1200 + GEMINI_THINKING_PAD_MS });
   });
 
   it('503 when no Google credential (or the connection has live voice unchecked)', async () => {

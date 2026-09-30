@@ -4,8 +4,6 @@
  * over WebRTC, Google Gemini Live over WebSocket), or typing.
  */
 
-import type { LiveAudioMode } from './audio-mode';
-
 export type VoiceMode = 'browser' | 'server' | 'realtime' | 'typed';
 
 export const VOICE_MODE_LABELS: Record<VoiceMode, string> = {
@@ -154,6 +152,4 @@ export interface VoiceClientOptions {
   speakInTypedMode?: boolean;
   /** Session start epoch (ms) for relative utterance timestamps. */
   sessionStartedAt: () => number;
-  /** Gemini Live: 'plain' streams the mic ungated and leaves turn-taking to Gemini (see audio-mode.ts). */
-  liveAudio?: LiveAudioMode;
 }

@@ -39,11 +39,6 @@ const RealtimeTokenBody = z
     reconnect: z.boolean().optional(),
     /** Live provider the browser adapter is for; naming the session's backup provider switches to it. */
     provider: z.enum(['google', 'openai']).optional(),
-    /**
-     * Gemini Live "plain audio" experiment: the browser streams the mic ungated and relies on Gemini's own
-     * activity detection, so the token keeps Google's default start-of-speech sensitivity.
-     */
-    plainAudio: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -194,13 +189,12 @@ export class ParticipantController {
       tools: setup.tools,
       config,
       resumeHandle,
-      plainAudio: !!body?.plainAudio,
     });
     await this.prisma.sessionEvent.create({
       data: {
         sessionId: s.id,
         type: 'provider.realtime_token',
-        payload: { provider, model: creds.model, expiresAt: creds.expiresAt, resumed: !!resumeHandle, reconnect: !!body?.reconnect, switched, plainAudio: !!body?.plainAudio },
+        payload: { provider, model: creds.model, expiresAt: creds.expiresAt, resumed: !!resumeHandle, reconnect: !!body?.reconnect, switched },
       },
     });
     return creds;

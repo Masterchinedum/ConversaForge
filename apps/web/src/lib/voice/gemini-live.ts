@@ -8,11 +8,12 @@
  *      The real API key and the prompt never reach the browser.
  *   2. `new GoogleGenAI({ apiKey: token, apiVersion: 'v1alpha' }).live.connect({ model, config, callbacks })`
  *      — the SDK opens `wss://generativelanguage.googleapis.com/ws/…BidiGenerateContentConstrained?access_token=…`.
- *   3. Mic → PCM16 mono 16 kHz base64 → `sendRealtimeInput({ audio: { data, mimeType: 'audio/pcm;rate=16000' } })`.
- *      While the agent is audible the mic is gated (see MicGate): through speakers the agent's own voice
- *      would come back as an "interruption". The local energy VAD (raised threshold while the agent plays)
- *      opens the gate when the participant really talks, sending the pre-roll first; the agent is ducked
- *      and, if the participant keeps talking over an already finished turn, cut.
+ *   3. Mic → PCM16 mono 16 kHz base64 → `sendRealtimeInput({ audio: { data, mimeType: 'audio/pcm;rate=16000' } })`,
+ *      continuously, as in Google's reference clients: the browser's echo canceller keeps the agent's own
+ *      voice out and Gemini's activity detection alone decides turns and barge-in. (An earlier echo gate +
+ *      local turn-taking layer was removed on 2026-09-30 after an A/B test showed no difference; see
+ *      docs/workstreams/I-live-models.md.) The local VAD only drives the level meter and the "speaking"
+ *      signal (indicator, server instruction timing, silence check-in).
  *      Model audio arrives as `serverContent.modelTurn.parts[].inlineData` (PCM16 24 kHz) and plays through a
  *      WebAudio queue with a small jitter buffer (gapless, instant stop, mixed into the call recording).
  *   4. `serverContent.inputTranscription` / `outputTranscription` → transcripts mirrored to our server as
@@ -27,17 +28,11 @@
  *      not generating or expected to, its audio finished playing, and the participant not mid-sentence.
  *   7. `sessionResumptionUpdate` handles + `goAway` → reconnect with a fresh token that resumes the session;
  *      without a handle, a fresh session whose instructions carry the transcript so far.
- *
- * Plain audio (`liveAudio: 'plain'`, experiment): step 3 without our turn-taking layer — every mic chunk is
- * sent (the browser's echo canceller is the only echo defence), no gate, pre-roll, ducking or tail cut, and
- * the token keeps Gemini's default start-of-speech sensitivity. Barge-in is whatever Gemini reports as
- * `interrupted`. The local VAD only drives the level meter and "speaking" indicator.
  */
 
 import type { FunctionResponseScheduling, LiveServerMessage, Session } from '@google/genai';
 import { fetchGeminiToken, type GeminiLiveCredentials } from '../live/runtime-api';
 import { AudioPlayer, base64ToBytes } from './audio-player';
-import { MicGate } from './mic-gate';
 import { downsample } from './pcm-capture';
 import { Emitter, type VoiceClient, type VoiceClientOptions, type VoiceEvents } from './types';
 import { EnergyVad } from './vad';
@@ -49,18 +44,12 @@ const MAX_RECONNECTS = 3;
 const USER_FINALIZE_GRACE_MS = 1200;
 /** A participant utterance that never gets an answer is committed after this much transcription silence. */
 const USER_IDLE_FINALIZE_MS = 3500;
-/** The mic stays gated this long after the agent's audio ends (room reverb, echo-canceller tail). */
-const GATE_HANGOVER_MS = 300;
-/** Pre-roll kept while gated (100 ms chunks): what the VAD needed before it was sure the participant spoke. */
-const PREROLL_CHUNKS = 5;
 /** Client content (instructions) waits this long after the participant's last transcribed words. */
 const INPUT_SETTLE_MS = 2500;
 /** A response we asked for that never starts stops holding instructions after this. */
 const RESPONSE_WAIT_MS = 8000;
 /** While busy for reasons that end with an event, re-check the instruction queue at this interval. */
 const BUSY_RECHECK_MS = 250;
-/** Sustained participant speech over the tail of an agent turn cuts the playback after this. */
-const TAIL_CUT_MS = 1200;
 /** `FunctionResponseScheduling.SILENT` without loading the SDK up front (it is imported lazily on connect). */
 const SILENT = 'SILENT' as FunctionResponseScheduling.SILENT;
 const INSTRUCTION_PREFIX = '[Session runtime instruction — not said by the participant. Follow it; never read it aloud.]';
@@ -240,7 +229,7 @@ interface AgentItem extends Item {
 
 export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClient {
   readonly mode = 'realtime' as const;
-  readonly label: string;
+  readonly label = 'Google Gemini Live';
   readonly listens = true;
   readonly speaks = true;
 
@@ -253,13 +242,9 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   private player: AudioPlayer | null = null;
   private mic: MicStreamer | null = null;
   private vad: EnergyVad | null = null;
-  private gate = new MicGate(PREROLL_CHUNKS);
-  private gateTimer: ReturnType<typeof setTimeout> | null = null;
   private userSpeaking = false;
   private user: Item | null = null;
   private agent: AgentItem | null = null;
-  /** The last reported agent turn (its audio may still be playing). */
-  private lastAgent: { id: string; text: string } | null = null;
   private reported = new Set<string>();
   private generating = false;
   /** We asked the model for a response (client content / tool results): hold instructions until it starts. */
@@ -267,7 +252,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   private lastInputAt = 0;
   private instructions: Array<{ text: string; respond: boolean; cancelOnSpeech?: boolean }> = [];
   private instructionTimer: ReturnType<typeof setTimeout> | null = null;
-  private tailCutTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingCalls = new Map<string, string>();
   private seenCalls = new Set<string>();
   private responses: Array<{ id?: string; name: string; response: Record<string, unknown>; scheduling?: FunctionResponseScheduling }> = [];
@@ -281,14 +265,10 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   private streamEnded = false;
   private agentAudible = false;
   private stopped = false;
-  /** Plain audio experiment: no echo gate / local turn-taking; Gemini decides (see the header). */
-  private readonly plain: boolean;
 
   constructor(private o: VoiceClientOptions) {
     super();
     this.ptt = o.turnTaking.mode === 'push_to_talk';
-    this.plain = o.liveAudio === 'plain';
-    this.label = this.plain ? 'Google Gemini Live (plain audio)' : 'Google Gemini Live';
   }
 
   async start(): Promise<void> {
@@ -303,7 +283,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     }
     let creds: GeminiLiveCredentials;
     try {
-      creds = await fetchGeminiToken(this.o.sessionId, this.o.token, { plainAudio: this.plain });
+      creds = await fetchGeminiToken(this.o.sessionId, this.o.token);
     } catch (e: any) {
       this.emit('error', {
         code: 'provider_unavailable',
@@ -322,15 +302,15 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
       throw e;
     }
     if (this.stopped) return; // stopped while connecting: nothing else to set up
-    if (this.plain && this.o.micStream!.getAudioTracks()[0]!.getSettings?.().echoCancellation === false) {
-      console.warn('[gemini-live] plain audio without echo cancellation: through speakers the agent will hear itself');
+    if (this.o.micStream!.getAudioTracks()[0]!.getSettings?.().echoCancellation === false) {
+      console.warn('[gemini-live] echo cancellation is off: through speakers the agent will hear itself');
     }
     this.mic = new MicStreamer(ctx, this.o.micStream!, (b64) => this.sendAudio(b64));
     await this.mic.start();
     this.vad = new EnergyVad(ctx, this.o.micStream!, {
       onLevel: (l) => this.emit('level', l),
-      onSpeechStart: ({ duringAgent }) => this.onLocalSpeech(true, duringAgent),
-      onSpeechEnd: () => this.onLocalSpeech(false, false),
+      onSpeechStart: () => this.onLocalSpeech(true),
+      onSpeechEnd: () => this.onLocalSpeech(false),
     });
     this.vad.start();
     this.applyListening();
@@ -405,8 +385,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     if (this.agent) this.reportAgent(this.agent.cutAt !== undefined); // buffered audio keeps playing
     this.generating = false;
     this.awaitingResponseUntil = 0;
-    this.clearTailCut();
-    this.gate.release(0);
     this.pendingCalls.clear();
     this.responses = [];
     try {
@@ -417,10 +395,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     this.emit('notice', 'Reconnecting live voice…');
     for (let attempt = 1; attempt <= MAX_RECONNECTS && !this.stopped; attempt++) {
       try {
-        const creds = await fetchGeminiToken(this.o.sessionId, this.o.token, {
-          ...(this.resumeHandle ? { resumeHandle: this.resumeHandle } : { reconnect: true }),
-          plainAudio: this.plain,
-        });
+        const creds = await fetchGeminiToken(this.o.sessionId, this.o.token, this.resumeHandle ? { resumeHandle: this.resumeHandle } : { reconnect: true });
         await this.open(creds);
         this.reconnecting = false;
         return;
@@ -551,7 +526,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   /** Barge-in reported by Gemini: stop playback immediately; the turn keeps only what was heard. */
   private onInterrupted() {
     this.finalizeAnsweredUser();
-    this.clearTailCut();
     const a = this.agent;
     if (a) {
       const stopped = this.player?.stopAll();
@@ -580,7 +554,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     this.agent = null;
     this.finalizeAnsweredUser(); // participant first, then the agent's answer (server orders by arrival)
     const full = cleanTranscript(a.text);
-    this.lastAgent = { id: a.id, text: full };
     const text = interrupted && a.cutAt !== undefined ? heardText(full, a.cutAt) : full;
     if (text) this.report(a.id, 'assistant', text, interrupted || undefined);
     else if (a.shown) this.emit('realtimeDelta', { itemId: a.id, role: 'assistant', text: '' }); // nothing said: hide the row
@@ -658,7 +631,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
    * playing here, or the participant is talking / just finished. 0 = send now.
    */
   private busyForMs(): number {
-    if (this.generating || this.userSpeaking || this.gate.agentAudible || this.player?.isPlaying()) return BUSY_RECHECK_MS;
+    if (this.generating || this.userSpeaking || this.agentAudible || this.player?.isPlaying()) return BUSY_RECHECK_MS;
     const now = Date.now();
     return Math.max(0, this.lastInputAt + INPUT_SETTLE_MS - now, this.awaitingResponseUntil - now);
   }
@@ -707,12 +680,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
 
   private sendAudio(b64: string) {
     if (!this.session || !this.ready || !this.listening()) return;
-    if (this.plain) return this.transmit(b64);
-    for (const chunk of this.gate.offer(b64)) this.transmit(chunk);
-  }
-
-  private transmit(b64: string) {
-    if (!this.session || !this.ready) return;
     this.streamEnded = false;
     try {
       this.session.sendRealtimeInput({ audio: { data: b64, mimeType: `audio/pcm;rate=${GEMINI_INPUT_RATE}` } });
@@ -737,96 +704,23 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     if (!this.listening()) this.endAudioStream();
   }
 
-  /** The local VAD's view of the participant (raised threshold + longer confirmation while the agent plays). */
-  private onLocalSpeech(speaking: boolean, duringAgent: boolean) {
+  /** The local VAD's view of the participant: indicator + instruction timing only (Gemini hears everything). */
+  private onLocalSpeech(speaking: boolean) {
     if (speaking && !this.listening()) return;
     if (this.userSpeaking === speaking) return;
     this.userSpeaking = speaking;
-    this.gate.userSpeaking = speaking;
     this.emit('speaking', speaking);
     if (speaking) this.dropStaleInstructions();
-    if (this.plain) {
-      // Gemini hears everything and handles barge-in itself; locally we only hold instructions meanwhile.
-      if (!speaking) this.flushInstructions();
-      return;
-    }
-    if (speaking) {
-      if (duringAgent || this.gate.agentAudible) this.openGate('speech');
-      return;
-    }
-    this.player?.duck(false);
-    this.clearTailCut();
-    // The agent kept talking (no interruption came back): let the model close the participant's activity.
-    if (this.gate.closed) this.endAudioStream();
-    this.flushInstructions();
-  }
-
-  private openGate(reason: 'speech' | 'agent_done') {
-    let chunks: string[];
-    if (reason === 'speech') {
-      chunks = this.gate.release();
-      if (this.player?.isPlaying() && this.o.turnTaking.allowBargeIn) {
-        // Yield like a person would: get quieter at once; if the participant keeps going, stop.
-        this.player.duck(true);
-        this.armTailCut();
-      }
-    } else {
-      // Only keep a little pre-roll when energy was already rising (a quick reply overlapping the agent's
-      // last word); otherwise the tail is just echo.
-      chunks = this.gate.release((this.vad?.state.aboveMs ?? 0) > 0 ? 3 : 0);
-    }
-    for (const c of chunks) this.transmit(c);
-  }
-
-  private armTailCut() {
-    this.clearTailCut();
-    this.tailCutTimer = setTimeout(() => {
-      this.tailCutTimer = null;
-      this.cutTail();
-    }, TAIL_CUT_MS);
-  }
-
-  private clearTailCut() {
-    if (this.tailCutTimer) clearTimeout(this.tailCutTimer);
-    this.tailCutTimer = null;
-  }
-
-  /** The participant has been talking over the agent for a while: stop the playback and record what was heard. */
-  private cutTail() {
-    if (!this.userSpeaking || !this.player?.isPlaying()) return;
-    if (this.agent) {
-      this.cancelSpeech('barge_in'); // the turn is reported cut when it completes
-      return;
-    }
-    const stopped = this.player.stopAll();
-    this.setAgentAudible(false);
-    const last = this.lastAgent;
-    if (stopped && last && stopped.turnId === last.id) {
-      // Already reported in full: the server updates the saved turn with what was actually heard.
-      const text = heardText(last.text, stopped.spokenChars);
-      if (text) this.emit('realtimeTranscript', { itemId: last.id, role: 'assistant', text, interrupted: true });
-    }
+    else this.flushInstructions();
   }
 
   private setAgentAudible(a: boolean) {
-    if (a) {
-      if (this.gateTimer) clearTimeout(this.gateTimer);
-      this.gateTimer = null;
-      this.gate.agentAudible = true;
-      this.vad?.setAgentPlaying(true);
-    } else if (this.gate.agentAudible && !this.gateTimer) {
-      // Keep the gate shut a moment longer: the room and the echo canceller need time to settle.
-      this.gateTimer = setTimeout(() => {
-        this.gateTimer = null;
-        this.gate.agentAudible = false;
-        this.vad?.setAgentPlaying(false);
-        this.openGate('agent_done');
-        this.flushInstructions();
-      }, GATE_HANGOVER_MS);
-    }
+    // A raised VAD threshold while the agent plays keeps residual echo from counting as the participant.
+    this.vad?.setAgentPlaying(a);
     if (a === this.agentAudible) return;
     this.agentAudible = a;
     this.emit('agentSpeaking', a);
+    if (!a) this.flushInstructions();
   }
 
   // ───────────────────────────── VoiceClient ─────────────────────────────
@@ -837,10 +731,7 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     if (this.user?.timer) clearTimeout(this.user.timer);
     if (this.responseTimer) clearTimeout(this.responseTimer);
     if (this.instructionTimer) clearTimeout(this.instructionTimer);
-    if (this.gateTimer) clearTimeout(this.gateTimer);
     this.instructionTimer = null;
-    this.gateTimer = null;
-    this.clearTailCut();
     try {
       this.session?.close();
     } catch {
@@ -874,7 +765,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
     const a = this.agent;
     const stopped = this.player?.stopAll();
     if (a && a.cutAt === undefined && (a.audio || stopped)) a.cutAt = stopped && stopped.turnId === a.id ? stopped.spokenChars : 0;
-    this.clearTailCut();
     this.setAgentAudible(false);
   }
 
@@ -892,7 +782,6 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   setTalking(held: boolean): void {
     if (!this.ptt) return;
     this.talking = held;
-    this.gate.forced = held;
     if (held) {
       if (this.agentAudible && this.o.turnTaking.allowBargeIn) this.cancelSpeech('barge_in');
       this.emit('speaking', true);
@@ -906,14 +795,11 @@ export class GeminiLiveAdapter extends Emitter<VoiceEvents> implements VoiceClie
   debugState() {
     return {
       ready: this.ready,
-      plainAudio: this.plain,
       generating: this.generating,
       agentAudible: this.agentAudible,
       playing: this.player?.isPlaying() ?? false,
       player: this.player?.getStats() ?? null,
-      gateClosed: this.gate.closed,
       userSpeaking: this.userSpeaking,
-      preroll: this.gate.buffered,
       resumeHandle: this.resumeHandle,
       queuedInstructions: this.instructions.length,
       pendingCalls: [...this.pendingCalls.keys()],

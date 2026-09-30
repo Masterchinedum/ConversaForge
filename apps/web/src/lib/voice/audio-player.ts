@@ -2,7 +2,6 @@
  * Agent audio playback through WebAudio (live-model PCM streams, server TTS chunks / TTS responses).
  * Playing through an AudioContext (instead of speechSynthesis or an <audio> element) lets us:
  *   - stop instantly on barge-in (with a short fade, so no click) and estimate how much text was heard,
- *   - duck the agent while the participant starts talking over it,
  *   - route the agent's voice into the call recording mix,
  *   - play a chunked stream gaplessly: chunks are resampled to the context rate with continuity across
  *     chunk boundaries (independently resampled chunks click at every seam), appended to one timeline,
@@ -47,7 +46,6 @@ const LEAD_S = 0.03;
 const MAX_HOLD_MS = 1200;
 const FADE_S = 0.02;
 const POLL_MS = 50;
-const DUCK_GAIN = 0.25;
 
 interface TurnPlayback {
   turnId: string;
@@ -156,11 +154,9 @@ function mixdown(buf: AudioBuffer): Float32Array {
 
 export class AudioPlayer extends Emitter<PlayerEvents> {
   private out: GainNode;
-  private duckNode: GainNode;
   private turns = new Map<string, TurnPlayback>();
   private current: string | null = null;
   private audible = false;
-  private ducked = false;
   private volume = 1;
   /** Context time up to which audio (of any turn) is scheduled: the shared, gapless timeline. */
   private playhead = 0;
@@ -173,9 +169,7 @@ export class AudioPlayer extends Emitter<PlayerEvents> {
     recordingSink?: AudioNode | null,
   ) {
     super();
-    this.duckNode = ctx.createGain();
     this.out = ctx.createGain();
-    this.duckNode.connect(this.out);
     this.out.connect(ctx.destination);
     if (recordingSink) this.out.connect(recordingSink);
     this.checkTimer = setInterval(() => this.poll(), POLL_MS);
@@ -184,16 +178,6 @@ export class AudioPlayer extends Emitter<PlayerEvents> {
   setVolume(v: number) {
     this.volume = v;
     this.out.gain.setValueAtTime(v, this.ctx.currentTime);
-  }
-
-  /** Lower the agent while the participant starts talking over it (restored on stopAll / duck(false)). */
-  duck(on: boolean) {
-    if (on === this.ducked) return;
-    this.ducked = on;
-    const g = this.duckNode.gain;
-    const now = this.ctx.currentTime;
-    g.cancelScheduledValues(now);
-    g.setTargetAtTime(on ? DUCK_GAIN : 1, now, on ? 0.04 : 0.1);
   }
 
   private turn(turnId: string, textChars = 0): TurnPlayback {
@@ -354,7 +338,7 @@ export class AudioPlayer extends Emitter<PlayerEvents> {
     buf.getChannelData(0).set(samples);
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(this.duckNode);
+    src.connect(this.out);
     const now = this.ctx.currentTime;
     const at = Math.max(now + LEAD_S, this.playhead);
     src.start(at);
@@ -437,7 +421,6 @@ export class AudioPlayer extends Emitter<PlayerEvents> {
       g.linearRampToValueAtTime(0, now + FADE_S);
       g.setValueAtTime(this.volume, now + FADE_S + 0.005);
     }
-    this.duck(false);
     this.playhead = 0;
     this.current = null;
     this.setAudible(false);
@@ -503,7 +486,6 @@ export class AudioPlayer extends Emitter<PlayerEvents> {
     if (this.checkTimer) clearInterval(this.checkTimer);
     this.checkTimer = null;
     try {
-      this.duckNode.disconnect();
       this.out.disconnect();
     } catch {
       /* ignore */

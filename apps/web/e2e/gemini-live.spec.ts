@@ -9,7 +9,7 @@
  * and "I'm done answering" → audioStreamEnd. Real Gemini audio is NOT exercised here.
  */
 import { expect, test, type WebSocketRoute } from '@playwright/test';
-import { createSession, installFakeMic, joinCall } from './helpers';
+import { createSession, joinCall } from './helpers';
 
 /** base64 PCM16 mono of a 440 Hz tone (`ms` long) at `rate`. */
 function tone(ms: number, rate = 24000): string {
@@ -209,7 +209,7 @@ test('Gemini Live adapter: ephemeral-token connect, transcripts once, barge-in, 
   expect(await page.getByTestId('voice-mode').innerText()).toContain('Google Gemini Live');
 });
 
-test('Gemini Live plain audio (?audio=plain): mic streams while the agent plays; Gemini decides barge-in', async ({ page }) => {
+test('Gemini Live: mic streams while the agent plays, Gemini decides barge-in, stale silence check-ins are dropped', async ({ page }) => {
   test.setTimeout(120_000);
   const tokenRequests: any[] = [];
   await page.route('**/api/runtime/sessions/*/realtime-token', async (route) => {
@@ -218,7 +218,7 @@ test('Gemini Live plain audio (?audio=plain): mic streams while the agent plays;
       json: {
         provider: 'google',
         model: 'gemini-live-test',
-        token: 'auth_tokens/test-eph-plain',
+        token: 'auth_tokens/test-eph-stream',
         apiVersion: 'v1alpha',
         expiresAt: Math.floor(Date.now() / 1000) + 1800,
         newSessionExpiresAt: Math.floor(Date.now() / 1000) + 120,
@@ -252,26 +252,24 @@ test('Gemini Live plain audio (?audio=plain): mic streams while the agent plays;
   });
 
   const { sessionId, sessionToken } = await createSession();
-  await page.goto(`/live/${sessionId}?audio=plain#t=${sessionToken}`);
+  await page.goto(`/live/${sessionId}#t=${sessionToken}`);
   await joinCall(page, { recordAudio: false });
-  await expect(page.getByTestId('voice-mode')).toContainText('Google Gemini Live (plain audio)');
-  expect(tokenRequests[0]).toEqual({ provider: 'google', plainAudio: true });
+  await expect(page.getByTestId('voice-mode')).toContainText('Google Gemini Live');
+  expect(tokenRequests[0]).toEqual({ provider: 'google' });
   await expect.poll(() => conns.length, { timeout: 20_000 }).toBe(1);
   const c1 = conns[0]!;
   const gem = (msg: unknown) => c1.ws.send(JSON.stringify(msg));
   const voice = () => page.evaluate(() => (window as any).__cfLive.voice()?.debugState?.());
   const audioSent = () => c1.received.filter((m) => m.realtimeInput?.audio).length;
   await expect.poll(audioSent, { timeout: 20_000 }).toBeGreaterThan(3);
-  expect((await voice())?.plainAudio).toBe(true);
 
-  // The agent speaks: in managed mode the (silent) mic would now be gated; plain keeps streaming.
+  // The agent speaks: the mic keeps streaming (the browser's echo canceller keeps the agent's voice out).
   gem({ serverContent: { outputTranscription: { text: 'Tell me about a time you disagreed with a colleague.' } } });
   gem({ serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: tone(3000) } }] } } });
   await expect.poll(async () => (await voice())?.agentAudible, { timeout: 10_000 }).toBe(true);
   const before = audioSent();
   await page.waitForTimeout(800);
   expect(audioSent() - before).toBeGreaterThanOrEqual(4);
-  expect((await voice())?.preroll).toBe(0);
 
   // Barge-in is Gemini's call: `interrupted` stops playback at once.
   gem({ serverContent: { interrupted: true } });
@@ -295,75 +293,6 @@ test('Gemini Live plain audio (?audio=plain): mic streams while the agent plays;
   await expect.poll(() => checkIns().length, { timeout: 8000 }).toBe(1);
   expect(checkIns()[0].clientContent.turnComplete).toBe(true);
 
-  // The choice sticks in this browser until ?audio=managed.
-  expect(await page.evaluate(() => localStorage.getItem('cf.liveAudioMode'))).toBe('plain');
-});
-
-test('device check: the audio switch shows only on your own test calls and the choice reaches the token request', async ({ page }) => {
-  test.setTimeout(120_000);
-  const tokenRequests: any[] = [];
-  await page.route('**/api/runtime/sessions/*/realtime-token', async (route) => {
-    tokenRequests.push(route.request().postDataJSON() ?? {});
-    await route.fulfill({
-      json: {
-        provider: 'google',
-        model: 'gemini-live-test',
-        token: 'auth_tokens/test-eph-switch',
-        apiVersion: 'v1alpha',
-        expiresAt: Math.floor(Date.now() / 1000) + 1800,
-        newSessionExpiresAt: Math.floor(Date.now() / 1000) + 120,
-        connectConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {}, sessionResumption: {} },
-        resumed: false,
-      },
-    });
-  });
-  await page.routeWebSocket(/generativelanguage\.googleapis\.com/, (ws) => {
-    ws.onMessage((m) => {
-      const d = JSON.parse(typeof m === 'string' ? m : m.toString('utf8'));
-      if (d.setup) ws.send(JSON.stringify({ setupComplete: {} }));
-    });
-  });
-  await page.routeWebSocket(/\/ws\/session$/, (ws) => {
-    const server = ws.connectToServer();
-    ws.onMessage((m) => server.send(m));
-    server.onMessage((m) => {
-      const d = JSON.parse(String(m));
-      if (d.type === 'welcome') d.config = { ...d.config, voiceMode: 'realtime', requestedVoiceMode: 'realtime', realtime: { provider: 'google', model: 'gemini-live-test' } };
-      if (['agent.start', 'agent.delta', 'agent.end', 'realtime.instruction', 'realtime.tool_result'].includes(d.type)) return;
-      ws.send(JSON.stringify(d));
-    });
-  });
-  const toDeviceCheck = async () => {
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByText('Before we start').waitFor();
-    await page.getByLabel(/I understand I’m talking with an AI/).check();
-    await page.getByLabel('Record audio of this call').uncheck();
-    await page.getByRole('button', { name: 'Agree and continue' }).click();
-    if (process.env.E2E_FAKE_MIC) await installFakeMic(page);
-    await page.getByRole('button', { name: /Allow microphone/ }).click();
-    await page.getByRole('button', { name: 'Join the call' }).waitFor();
-  };
-
-  // A participant's link (not started from this browser with ▶ Try it): no experiment switch.
-  const other = await createSession();
-  await page.goto(`/live/${other.sessionId}#t=${other.sessionToken}`);
-  await toDeviceCheck();
-  await expect(page.getByTestId('planned-voice-mode')).toContainText('Google Gemini Live');
-  await expect(page.getByTestId('live-audio-mode')).toHaveCount(0);
-
-  // Your own test call: the switch is offered (Managed by default); choosing Plain is used for the call.
-  const own = await createSession();
-  await page.evaluate((id) => localStorage.setItem(`cf:selftest:${id}`, '1'), own.sessionId);
-  await page.goto(`/live/${own.sessionId}#t=${own.sessionToken}`);
-  await toDeviceCheck();
-  const sw = page.getByTestId('live-audio-mode');
-  await expect(sw.getByLabel(/Managed/)).toBeChecked();
-  await sw.getByLabel(/Plain/).check();
-  await page.getByRole('button', { name: 'Join the call' }).click();
-  await page.getByTestId('call-status').filter({ hasText: 'Live' }).waitFor({ timeout: 30_000 });
-  await expect(page.getByTestId('voice-mode')).toContainText('Google Gemini Live (plain audio)');
-  expect(tokenRequests.at(-1)).toEqual({ provider: 'google', plainAudio: true });
-  expect(await page.evaluate(() => localStorage.getItem('cf.liveAudioMode'))).toBe('plain');
 });
 
 test('Gemini Live unavailable on the server → pipeline fallback is clearly indicated', async ({ page }) => {

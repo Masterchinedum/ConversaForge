@@ -17,7 +17,6 @@ import { VadState } from '../src/lib/voice/vad';
 import { planVoice, unavailableKeyFor, voiceLabel } from '../src/lib/voice';
 import { cleanTranscript, floatToPcm16Base64, heardText } from '../src/lib/voice/gemini-live';
 import { Resampler } from '../src/lib/voice/audio-player';
-import { MicGate } from '../src/lib/voice/mic-gate';
 
 /** Deterministic clock + timers for the detector. */
 function fakeClock() {
@@ -189,31 +188,6 @@ test('transcript cleaning: placeholder tokens and punctuation-only fragments are
   expect(cleanTranscript('<no')).toBe('');
   expect(cleanTranscript('Sure. <no')).toBe('Sure.');
   expect(cleanTranscript('<no speech>{pau')).toBe('');
-});
-
-test('mic gate: withholds mic audio while the agent is audible, replays the pre-roll when the participant talks', () => {
-  const g = new MicGate(3);
-  expect(g.closed).toBe(false);
-  expect(g.offer('a')).toEqual(['a']);
-  g.agentAudible = true;
-  expect(g.closed).toBe(true);
-  for (const c of ['b', 'c', 'd', 'e']) expect(g.offer(c)).toEqual([]);
-  expect(g.buffered).toBe(3); // ring keeps the newest chunks only
-  g.userSpeaking = true;
-  expect(g.closed).toBe(false);
-  expect(g.release()).toEqual(['c', 'd', 'e']);
-  expect(g.buffered).toBe(0);
-  expect(g.offer('f')).toEqual(['f']);
-  // Participant stops while the agent is still talking → closed again; the agent finishing drops the echo tail.
-  g.userSpeaking = false;
-  expect(g.offer('g')).toEqual([]);
-  g.agentAudible = false;
-  expect(g.release(0)).toEqual([]);
-  expect(g.closed).toBe(false);
-  // Push-to-talk held always streams.
-  g.agentAudible = true;
-  g.forced = true;
-  expect(g.offer('h')).toEqual(['h']);
 });
 
 test('resampler: continuous across chunk boundaries, exact 2× upsampling, keeps sample count over time', () => {

@@ -4,7 +4,9 @@
  *
  * The microphone is synthetic. With E2E_ECHO=<gain> (e.g. 0.5) everything the page plays is fed back into
  * the mic after 60 ms at that gain: worst-case speaker echo with no echo cancellation, which is what made
- * the agent interrupt itself and repeat the greeting in the first real call. The test reports whether the
+ * the agent interrupt itself and repeat the greeting in the first real call. Since 2026-09-30 the mic is
+ * streamed ungated (the browser's echo canceller is the defence), so E2E_ECHO > 0 is expected to fail: the
+ * synthetic echo bypasses echo cancellation. Run with E2E_ECHO=0. The test reports whether the
  * greeting played once and uninterrupted, how continuous the playback was (audible start/stop transitions),
  * the transcript rows shown, and any adapter warnings; it asserts the parts that must hold.
  */
@@ -88,7 +90,7 @@ test('real Gemini Live: greeting plays once, uninterrupted, with (optional) simu
   await expect(page.getByTestId('voice-mode')).toContainText('Google Gemini Live', { timeout: 30_000 });
 
   // Sample the adapter every 100 ms while the greeting (and whatever follows) plays.
-  const samples: Array<{ t: number; playing: boolean; agentAudible: boolean; gateClosed: boolean; userSpeaking: boolean; generating: boolean; rows: number; player: any }> = [];
+  const samples: Array<{ t: number; playing: boolean; agentAudible: boolean; userSpeaking: boolean; generating: boolean; rows: number; player: any }> = [];
   const t0 = Date.now();
   while (Date.now() - t0 < listenMs) {
     samples.push(
@@ -99,7 +101,6 @@ test('real Gemini Live: greeting plays once, uninterrupted, with (optional) simu
           t: Date.now(),
           playing: !!s.playing,
           agentAudible: !!s.agentAudible,
-          gateClosed: !!s.gateClosed,
           userSpeaking: !!s.userSpeaking,
           generating: !!s.generating,
           rows: document.querySelectorAll('[data-testid=transcript] li').length,
@@ -117,8 +118,6 @@ test('real Gemini Live: greeting plays once, uninterrupted, with (optional) simu
   const starts = samples.filter((s, i) => s.playing && (i === 0 || !samples[i - 1]!.playing)).length;
   const firstPlay = samples.find((s) => s.playing);
   const audibleMs = samples.filter((s) => s.playing).length * 100;
-  const gateClosedWhilePlaying = samples.filter((s) => s.playing && s.gateClosed).length;
-  const playingSamples = samples.filter((s) => s.playing).length;
   const falseBargeIns = samples.filter((s, i) => s.userSpeaking && (i === 0 || !samples[i - 1]!.userSpeaking)).length;
 
   console.log('\n=== real Gemini Live smoke report ===');
@@ -133,7 +132,7 @@ test('real Gemini Live: greeting plays once, uninterrupted, with (optional) simu
     }
   }
   const last = samples[samples.length - 1]?.player;
-  console.log(`audible playback: ${audibleMs} ms in ${starts} run(s) [${runs.join(', ')}]; gate closed during ${gateClosedWhilePlaying}/${playingSamples} playing samples; local speech starts: ${falseBargeIns}`);
+  console.log(`audible playback: ${audibleMs} ms in ${starts} run(s) [${runs.join(', ')}]; local speech starts: ${falseBargeIns}`);
   console.log(`player: ${last ? `${last.underruns} underrun(s), ${last.buffers} buffers, received ${last.receivedS.toFixed(2)} s, scheduled ${last.scheduledS.toFixed(2)} s, cushion ${last.cushionS.toFixed(2)} s` : 'n/a'}`);
   console.log(`transcripts mirrored: ${transcripts.map((m) => `${m.role}${m.interrupted ? '(interrupted)' : ''}: ${String(m.text).slice(0, 90)}`).join(' | ')}`);
   console.log(`rows shown (${rows.length}): ${rows.join(' || ')}`);

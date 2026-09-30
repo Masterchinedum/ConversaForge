@@ -884,14 +884,11 @@ d('live runtime over WebSocket (simulator, test DB)', () => {
       expect(resumedPrompt).toContain('<conversation_so_far');
       expect(resumedPrompt).toContain('participant: Yes, ready.');
       expect(bodies[2].body.bidiGenerateContentSetup.sessionResumption).toEqual({});
-      expect(bodies[2].body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBe('START_SENSITIVITY_LOW');
-      // Plain-audio experiment: Google's default start sensitivity (the browser does not gate the mic).
-      await (await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ reconnect: true, plainAudio: true }), headers: { 'content-type': 'application/json' } })).json();
-      expect(bodies[3].body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBeUndefined();
+      expect(bodies[2].body.bidiGenerateContentSetup.realtimeInputConfig.automaticActivityDetection.startOfSpeechSensitivity).toBeUndefined();
       // Malformed handles are rejected before reaching Google.
       const bad = await rest(`${s.sessionId}/realtime-token`, s.sessionToken, { method: 'POST', body: JSON.stringify({ resumeHandle: 'has spaces' }), headers: { 'content-type': 'application/json' } });
       expect(bad.status).toBe(422);
-      expect(bodies).toHaveLength(4);
+      expect(bodies).toHaveLength(3);
 
       c.send({ type: 'control', action: 'end' });
       await c.next('state', (m) => m.state === 'ENDING');
