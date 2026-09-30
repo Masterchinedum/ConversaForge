@@ -145,8 +145,24 @@ export class StudioAgentService {
     const s = await this.scenarios.findScenario(workspaceId, scenarioId);
     const run = await this.findRun(workspaceId, s.id, runId);
     if (run.status !== 'RUNNING') return formatProposal(run);
-    await this.prisma.draftAssistantProposal.updateMany({ where: { id: run.id, workspaceId, status: 'RUNNING' }, data: { cancelRequested: true } });
-    this.aborts.get(run.id)?.abort();
+    if (this.running.has(run.id)) {
+      await this.prisma.draftAssistantProposal.updateMany({ where: { id: run.id, workspaceId, status: 'RUNNING' }, data: { cancelRequested: true } });
+      this.aborts.get(run.id)?.abort();
+    } else {
+      // Not executing in this process (e.g. the API restarted): nothing will pick the flag up, so close it now.
+      const evs = (run.events as unknown as AgentEvent[]) ?? [];
+      const changed = ((run.changes as unknown as ProposalChange[]) ?? []).length;
+      await this.prisma.draftAssistantProposal.updateMany({
+        where: { id: run.id, workspaceId, status: 'RUNNING' },
+        data: {
+          status: 'CANCELLED',
+          cancelRequested: true,
+          finishedAt: new Date(),
+          resolvedAt: new Date(),
+          events: [...evs, event('check', `Stopped. ${changed ? `Edits made before stopping were kept (${changed} field${changed === 1 ? '' : 's'}); you can undo them.` : 'Nothing was changed.'}`)] as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
     return formatProposal(await this.findRun(workspaceId, s.id, runId));
   }
 

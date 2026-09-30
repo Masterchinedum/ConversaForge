@@ -105,7 +105,7 @@ const KITS: Record<ScenarioType, TypeKit> = {
       'Never ask about age, family status, religion, health, nationality or other protected characteristics',
       'Do not promise hiring outcomes',
     ],
-    firstTurn: (s) => `Hi, thanks for joining. I'm ${s.personaName}. We have about ${s.minutes} minutes${s.subject ? (/ role$/.test(s.subject) ? ` for the ${s.subject}` : ` to talk about ${s.subject}`) : ''}. Could you start by briefly introducing yourself?`,
+    firstTurn: (s) => `Hi, thanks for joining. I'm ${s.personaName}. We have about ${s.minutes} minutes${s.subject ? (ROLE_SUFFIX.test(s.subject) ? ` for the ${s.subject}` : ` to talk about ${s.subject}`) : ''}. Could you start by briefly introducing yourself?`,
     closing: 'Thank you for your time today — that covers everything I wanted to ask. Best of luck!',
     tone: 'professional and warm',
   },
@@ -361,10 +361,12 @@ function detectWithPhrase(text: string): string | null {
   return phrase;
 }
 
+const ROLE_SUFFIX = / (?:role|position|job|opening|internship)$/;
+
 /** "for a senior product manager role" → the role an interview (or similar) is for. */
 function detectRole(text: string): string | null {
-  const m = text.match(/\bfor (?:a |an |the |our )?([a-z][a-z0-9 \-/&]{2,60}?) (?:role|position|job|opening)\b/i);
-  return m ? `${m[1]!.trim()} role` : null;
+  const m = text.match(/\bfor (?:a |an |the |our )?([a-z][a-z0-9 \-/&]{2,60}?) (role|position|job|opening|internship)\b/i);
+  return m ? `${m[1]!.trim()} ${m[2]!.toLowerCase()}` : null;
 }
 
 function detectSubject(text: string): string | null {
@@ -474,7 +476,7 @@ export function ruleBasedDraft(instruction: string, draft: ScenarioConfig, locke
   const minutes = detectMinutes(instruction);
   const withPhrase = detectWithPhrase(instruction);
   const subject = detectSubject(instruction);
-  const traits = detectTraits(instruction);
+  const traits = detectTraits(instruction).filter((t) => !(subject ?? '').toLowerCase().split(/\s+/).includes(t));
   const personaPhrase = kit.personaFromWith && (isFirstDraft || /\b(?:persona|character|plays?|playing|role)\b/.test(lower)) ? withPhrase : null;
   const effMinutes = minutes ?? draft.basics.targetDurationMinutes;
   const personaName = draft.persona.name.trim() || NAMES[hashIndex(instruction, NAMES.length)]!;
@@ -536,7 +538,7 @@ export function ruleBasedDraft(instruction: string, draft: ScenarioConfig, locke
   const kindLabel = type === 'custom' ? 'Conversation' : SCENARIO_TYPE_LABELS[type];
   const personaLabel = personaPhrase ? `${/^[aeiou]/i.test(personaPhrase) ? 'an' : 'a'} ${personaPhrase}` : null;
   const kindPhrase = extractKindPhrase(instruction) ?? kit.kind;
-  const subjectPhrase = subject ? (/ role$/.test(subject) ? ` for the ${subject}` : ` about ${subject}`) : '';
+  const subjectPhrase = subject ? (ROLE_SUFFIX.test(subject) ? ` for the ${subject}` : ` about ${subject}`) : '';
   const name = truncate(capitalize(`${kindPhrase}${personaLabel ? ` with ${personaLabel}` : ''}${!personaLabel ? subjectPhrase : ''}`), 120);
 
   if (explicitName) force('basics.name', truncate(explicitName, 120), 'The name you asked for');
@@ -552,7 +554,7 @@ export function ruleBasedDraft(instruction: string, draft: ScenarioConfig, locke
   );
   propose(
     'basics.participantInstructions',
-    `You will talk with an AI ${kit.aiRole.toLowerCase()} for about ${effMinutes} minutes. You play the ${kit.participantRole}.${subject && isFirstDraft && !/ role$/.test(subject) ? ` The conversation is about ${subject}.` : ''} Speak naturally; you can pause to think and the AI will wait.`,
+    `You will talk with an AI ${kit.aiRole.toLowerCase()} for about ${effMinutes} minutes. You play the ${kit.participantRole}.${subject && isFirstDraft && !ROLE_SUFFIX.test(subject) ? ` The conversation is about ${subject}.` : ''} Speak naturally; you can pause to think and the AI will wait.`,
     'Tells participants what to expect and what role they play (no private instructions or scoring details)',
   );
 
@@ -564,7 +566,7 @@ export function ruleBasedDraft(instruction: string, draft: ScenarioConfig, locke
   const traitText = traits.length ? `${capitalize(traits.join(', '))}. ` : '';
   propose(
     'persona.description',
-    `${traitText}${personaPhrase ? `Plays ${personaLabel}` : `Acts as the ${kit.aiRole.toLowerCase()}`} in a ${kit.kind}${aboutSubject}. Stays in character, keeps answers short (this is a voice conversation), and reacts realistically to how the ${kit.participantRole} behaves.`,
+    `${traitText}${personaPhrase ? `Plays ${personaLabel}` : `Acts as the ${kit.aiRole.toLowerCase()}`} in ${/^[aeiou]/i.test(kit.kind) ? 'an' : 'a'} ${kit.kind}${aboutSubject}. Stays in character, keeps answers short (this is a voice conversation), and reacts realistically to how the ${kit.participantRole} behaves.`,
     'Private persona description (never shown to participants)',
   );
 

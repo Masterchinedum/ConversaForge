@@ -1,20 +1,22 @@
 'use client';
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fieldLabel } from '@cf/shared';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
-import { Alert, Badge, Button, Checkbox, SimulatedBadge, Spinner, Textarea, clsx } from '@/components/ui';
+import { Alert, Badge, Button, Checkbox, SimulatedBadge, Spinner, clsx, useToast } from '@/components/ui';
+import { Icon } from '../icons';
 import { renderValue } from '../panels';
-import type { Proposal, ScenarioDetail } from '../types';
+import type { AgentEvent, Proposal, ScenarioDetail } from '../types';
 import type { ScenarioDraft } from '../use-scenario-draft';
 
-const EXAMPLES = [
-  'A 20-minute behavioral interview for a senior product manager. Ask about stakeholder management and a launch that went wrong. Score communication, ownership and product judgment, and have a person review every result.',
-  'A 10-minute sales discovery call with a skeptical CFO at a logistics company who is evaluating our analytics product.',
-  'A 15-minute coaching session that teaches active listening, then lets the learner practise with a frustrated customer.',
-];
-
+export type AgentMode = 'standard' | 'flash' | 'deep';
 type Change = Proposal['changes'][number];
+
+const MODE_HELP: Record<AgentMode, string> = {
+  standard: 'Drafts, then expands the AI instructions, aligns the rubric and fixes validation errors.',
+  flash: 'Flash Mode: one fast pass and a check. Fewer model calls; no expansion or fix passes.',
+  deep: 'Deep Research: searches your workspace knowledge base first, then drafts and reviews the whole scenario.',
+};
 
 function readStored(key: string) {
   try {
@@ -32,123 +34,144 @@ function writeStored(key: string, value: string) {
   }
 }
 
+const fmtDuration = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+};
+const fmtDay = (d: Date) => `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+const fmtTime = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+/** Starts an agent run; shared by the composer, Quick Prompts and the name wand. */
+export async function startAgentRun(draft: ScenarioDraft, wsPath: (p: string) => string, instruction: string, mode: AgentMode): Promise<Proposal> {
+  if (!(await draft.flush())) throw new Error('Your latest edits could not be saved, so the assistant cannot see them yet. Resolve the save problem and try again.');
+  const id = await draft.ensureCreated();
+  return api<Proposal>(wsPath(`/scenarios/${id}/studio/runs`), { method: 'POST', body: { instruction, mode } });
+}
+
 /**
- * Scenario Studio conversation: the creator's messages and the assistant's replies, each reply carrying
- * the field changes it proposes (apply all / selected / discard), the fields it left alone, open
- * questions and requests the runtime cannot deliver. History is the server's proposal log, so it
- * survives reloads; an unsent message is kept in local storage.
+ * Scenario Studio conversation. Each creator message starts an agent run that edits the draft in steps;
+ * the run's progress (narration, tools, field updates, checks) streams in by polling and stays in the
+ * history. Older "review" proposals (from the classic editor) still show with Apply / Discard.
  */
 export function StudioChat({
   draft,
   proposals,
   loaded,
   refresh,
+  starting,
+  setStarting,
   onApplied,
   onGoto,
   onOpenTemplates,
+  userInitials,
 }: {
   draft: ScenarioDraft;
   /** Oldest first. */
   proposals: Proposal[];
   loaded: boolean;
   refresh: () => Promise<unknown>;
+  starting: string | null;
+  setStarting: (msg: string | null) => void;
   onApplied: (d: ScenarioDetail, paths: string[]) => void;
   onGoto: (path: string) => void;
-  onOpenTemplates?: () => void;
+  onOpenTemplates: () => void;
+  userInitials: string;
 }) {
   const { wsPath } = useWorkspace();
+  const toast = useToast();
   const storageKey = `cf:studio:composer:${draft.scenarioId ?? 'new'}`;
   const [text, setText] = useState('');
-  const [sending, setSending] = useState<string | null>(null);
+  const [mode, setMode] = useState<AgentMode>('standard');
   const [sendError, setSendError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [plusOpen, setPlusOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Restore an unsent message (per scenario; a new draft's message moves with it once created).
+  const running = proposals.find((p) => p.status === 'RUNNING') ?? null;
+  const working = !!running || !!starting;
+
   useEffect(() => {
     setText((t) => t || readStored(storageKey) || (draft.scenarioId ? readStored('cf:studio:composer:new') : ''));
     if (draft.scenarioId) writeStored('cf:studio:composer:new', '');
+    const m = readStored('cf:studio:mode');
+    if (m === 'flash' || m === 'deep') setMode(m);
   }, [storageKey, draft.scenarioId]);
   useEffect(() => writeStored(storageKey, text), [storageKey, text]);
+  useEffect(() => writeStored('cf:studio:mode', mode === 'standard' ? '' : mode), [mode]);
 
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+
+  const lastEvents = running?.events.length ?? 0;
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [proposals.length, sending, sendError]);
-
-  const selectedFor = (p: Proposal) => selected[p.id] ?? p.changes.map((c) => c.path);
-  const toggle = (p: Proposal, path: string, on: boolean) => {
-    const cur = new Set(selectedFor(p));
-    if (on) cur.add(path);
-    else cur.delete(path);
-    setSelected((s) => ({ ...s, [p.id]: [...cur] }));
-  };
+  }, [proposals.length, lastEvents, starting, sendError]);
 
   const send = async (message: string) => {
     const msg = message.trim();
-    if (msg.length < 3 || sending) return;
-    setSending(msg);
+    if (msg.length < 3 || working) return;
+    setStarting(msg);
     setSendError(null);
     setText('');
-    const startedAt = Date.now();
-    let id: string | null = null;
     try {
-      // The assistant reads the saved draft: save pending edits first (this also creates a new draft).
-      if (!(await draft.flush())) throw new Error('Your latest edits could not be saved, so the assistant cannot see them yet. Resolve the save problem above and try again.');
-      id = await draft.ensureCreated();
-      await api<Proposal>(wsPath(`/scenarios/${id}/assistant`), { method: 'POST', body: { instruction: msg } });
+      await startAgentRun(draft, wsPath, msg, mode);
       await refresh();
     } catch (e) {
-      // A proxy or network timeout can drop the response while the assistant still finishes: if the
-      // reply to this message was stored, show it instead of an error.
-      const recovered = id ? await recoverReply(msg, startedAt) : false;
-      if (!recovered) {
-        setSendError(errorMessage(e));
-        setText((t) => t || msg);
-      }
+      setSendError(e instanceof ApiError && e.code === 'agent_busy' ? 'The assistant is still working on the previous message.' : errorMessage(e));
+      setText((t) => t || msg);
     } finally {
-      setSending(null);
+      setStarting(null);
     }
   };
 
-  /** Look for a stored reply to `msg` made after `since` (polls briefly, the model may still be writing). */
-  const recoverReply = async (msg: string, since: number) => {
-    for (let i = 0; i < 12; i++) {
-      const data = (await refresh().catch(() => null)) as { data?: Proposal[] } | null | undefined;
-      if (data?.data?.some((p) => p.instruction === msg && new Date(p.createdAt).getTime() >= since - 5000)) return true;
-      await new Promise((r) => setTimeout(r, 5000));
+  const stop = async () => {
+    if (!running || !draft.scenarioId) return;
+    try {
+      await api(wsPath(`/scenarios/${draft.scenarioId}/studio/runs/${running.id}/cancel`), { method: 'POST', body: {} });
+      await refresh();
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
-    return false;
   };
 
-  const apply = async (p: Proposal, paths: string[]) => {
+  const undo = async (p: Proposal) => {
     if (!draft.scenarioId) return;
     setBusy(p.id);
-    setActionError((m) => ({ ...m, [p.id]: '' }));
     try {
-      if (!(await draft.flush())) throw new Error('Save your latest edits before applying suggestions.');
-      const r = await api<{ status: string; appliedPaths: string[]; scenario: ScenarioDetail }>(wsPath(`/scenarios/${draft.scenarioId}/assistant/${p.id}/apply`), {
-        method: 'POST',
-        body: { paths },
-      });
-      onApplied(r.scenario, r.appliedPaths);
+      const r = await api<{ reverted: string[]; skipped: string[]; scenario: ScenarioDetail }>(wsPath(`/scenarios/${draft.scenarioId}/studio/runs/${p.id}/undo`), { method: 'POST', body: {} });
+      onApplied(r.scenario, r.reverted);
+      toast.success(r.skipped.length ? `Undone. Kept ${r.skipped.length} field(s) you changed since.` : 'Undone');
       await refresh();
     } catch (e) {
-      const msg =
-        e instanceof ApiError && e.code === 'stale'
-          ? `${e.message}`
-          : e instanceof ApiError && e.code === 'locked'
-            ? `${e.message}. Unlock them or apply the other changes.`
-            : errorMessage(e);
-      setActionError((m) => ({ ...m, [p.id]: msg }));
+      setActionError((m) => ({ ...m, [p.id]: errorMessage(e) }));
     } finally {
       setBusy(null);
     }
   };
 
+  // Classic "review" proposals (made in the classic editor) are still applied by hand.
+  const apply = async (p: Proposal, paths: string[]) => {
+    if (!draft.scenarioId) return;
+    setBusy(p.id);
+    try {
+      if (!(await draft.flush())) throw new Error('Save your latest edits before applying suggestions.');
+      const r = await api<{ appliedPaths: string[]; scenario: ScenarioDetail }>(wsPath(`/scenarios/${draft.scenarioId}/assistant/${p.id}/apply`), { method: 'POST', body: { paths } });
+      onApplied(r.scenario, r.appliedPaths);
+      await refresh();
+    } catch (e) {
+      setActionError((m) => ({ ...m, [p.id]: errorMessage(e) }));
+    } finally {
+      setBusy(null);
+    }
+  };
   const reject = async (p: Proposal) => {
     if (!draft.scenarioId) return;
     setBusy(p.id);
@@ -162,12 +185,8 @@ export function StudioChat({
     }
   };
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    void send(text);
-  };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send(text);
     }
@@ -176,235 +195,350 @@ export function StudioChat({
     setText((t) => `${t ? `${t}\n` : ''}${q}\n→ `);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
+  const copyConversation = async () => {
+    const lines = proposals.flatMap((p) => [`You: ${p.instruction}`, ...p.events.filter((e) => e.kind !== 'tool').map((e) => `Assistant: ${e.text}`), ...(p.reply ? [`Assistant: ${p.reply}`] : []), '']);
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast.success('Conversation copied');
+    } catch {
+      toast.error('Could not copy');
+    }
+  };
 
-  const hasPending = proposals.some((p) => p.status === 'PENDING');
-  const empty = loaded && !proposals.length && !sending;
+  const empty = loaded && !proposals.length && !starting;
+  let lastDay = '';
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
-      <div ref={listRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4" data-testid="studio-conversation">
+    <div className="relative flex h-full min-h-0 flex-col bg-slate-50">
+      <div className="flex h-9 shrink-0 items-center justify-end px-2">
+        {!!proposals.length && (
+          <button type="button" onClick={copyConversation} className="rounded p-1.5 text-slate-500 hover:bg-white hover:text-slate-900" aria-label="Copy conversation" title="Copy conversation">
+            <Icon name="copy" />
+          </button>
+        )}
+      </div>
+      <div ref={listRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4" data-testid="studio-conversation">
         {!loaded && draft.scenarioId && (
           <p className="flex items-center gap-2 text-sm text-slate-500">
             <Spinner /> Loading conversation…
           </p>
         )}
         {empty && (
-          <div className="space-y-4 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Describe the scenario you want</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Say who the AI plays, who the participant is, what the conversation should achieve, how long it takes and how it should be scored. The configuration on the right fills in as you go, and you can edit any field yourself.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Try an example</p>
-              {EXAMPLES.map((ex) => (
-                <button key={ex} type="button" onClick={() => setText(ex)} className="block w-full rounded-md border border-slate-200 bg-white p-3 text-left text-sm text-slate-700 hover:border-brand-300 hover:bg-brand-50">
-                  {ex}
-                </button>
-              ))}
-            </div>
-            {onOpenTemplates && (
-              <p className="text-xs text-slate-500">
-                Prefer a starting point?{' '}
-                <button type="button" className="text-brand-700 underline" onClick={onOpenTemplates}>
-                  Start from a template or import YAML/JSON
-                </button>
-              </p>
-            )}
+          <div className="space-y-3 py-6 text-center">
+            <Icon name="sparkles" className="mx-auto h-8 w-8 text-brand-600" />
+            <h2 className="text-lg font-semibold text-slate-900">Describe the scenario you want</h2>
+            <p className="mx-auto max-w-sm text-sm text-slate-600">Say who the AI plays, who practises, the goal, the length and how it should be scored. The form on the right fills in as the assistant works.</p>
           </div>
         )}
 
-        {proposals.map((p) => (
-          <div key={p.id} className="space-y-3" data-testid="studio-exchange">
-            <UserBubble text={p.instruction} />
-            <AssistantBubble simulated={p.simulated}>
-              <p className="whitespace-pre-wrap text-sm text-slate-800" data-testid="assistant-reply">
-                {p.reply || (p.changes.length ? 'Here are the changes I suggest.' : 'I did not change anything.')}
-              </p>
-              {p.changes.length > 0 && (
-                <ChangeList
-                  proposal={p}
-                  selected={selectedFor(p)}
-                  onToggle={(path, on) => toggle(p, path, on)}
+        {proposals.map((p) => {
+          const d = new Date(p.createdAt);
+          const day = d.toDateString();
+          const divider = day !== lastDay;
+          lastDay = day;
+          return (
+            <div key={p.id} className="space-y-3" data-testid="studio-exchange">
+              {divider && <DateDivider label={fmtDay(d)} />}
+              <UserBubble text={p.instruction} time={fmtTime(d)} initials={userInitials} />
+              {p.mode === 'review' ? (
+                <ReviewProposal
+                  p={p}
+                  selected={selected[p.id] ?? p.changes.map((c) => c.path)}
+                  onToggle={(path, on) => setSelected((s) => ({ ...s, [p.id]: on ? [...(s[p.id] ?? p.changes.map((c) => c.path)), path] : (s[p.id] ?? p.changes.map((c) => c.path)).filter((x) => x !== path) }))}
                   busy={busy === p.id}
                   readOnly={draft.readOnly}
                   onApply={(paths) => apply(p, paths)}
                   onReject={() => reject(p)}
                   onGoto={onGoto}
                 />
+              ) : (
+                <RunView run={p} now={now} busy={busy === p.id} onUndo={() => undo(p)} onGoto={onGoto} onAnswer={answer} />
               )}
-              {actionError[p.id] && (
-                <Alert tone="error" title="Not applied">
-                  {actionError[p.id]}
-                </Alert>
-              )}
-              <LeftAlone preserved={p.preserved} onGoto={onGoto} />
-              {p.unsupported.length > 0 && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900" data-testid="assistant-unsupported">
-                  <p className="font-semibold">Not possible in the runtime</p>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                    {p.unsupported.map((u, i) => (
-                      <li key={i}>
-                        <span className="font-medium">{u.request}</span> — {u.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {p.questions.length > 0 && (
-                <div className="space-y-1" data-testid="assistant-questions">
-                  <p className="text-xs font-semibold text-slate-600">Open questions</p>
-                  {p.questions.map((q, i) => (
-                    <button key={i} type="button" onClick={() => answer(q)} className="block w-full rounded border border-slate-200 bg-white px-2 py-1 text-left text-xs text-slate-700 hover:bg-slate-50" title="Answer in the message box">
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {p.dropped.length > 0 && (
-                <details className="text-xs text-slate-500">
-                  <summary className="cursor-pointer">{p.dropped.length} suggestion(s) were discarded by the safety checks</summary>
-                  <ul className="list-disc pl-4">
-                    {p.dropped.map((d, i) => (
-                      <li key={i}>
-                        {d.path === '*' ? 'Response' : fieldLabel(d.path)}: {d.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </AssistantBubble>
-          </div>
-        ))}
+              {actionError[p.id] && <Alert tone="error">{actionError[p.id]}</Alert>}
+            </div>
+          );
+        })}
 
-        {sending && (
+        {starting && (
           <div className="space-y-3">
-            <UserBubble text={sending} />
-            <AssistantBubble>
-              <p className="flex items-center gap-2 text-sm text-slate-600" role="status">
-                <Spinner /> Working on your scenario… A full draft from an AI model can take a minute or two.
-              </p>
-            </AssistantBubble>
+            {!proposals.length && <DateDivider label={fmtDay(new Date())} />}
+            <UserBubble text={starting} time={fmtTime(new Date())} initials={userInitials} />
+            <Working label="Working — Connecting to agent" />
           </div>
         )}
         {sendError && (
-          <Alert tone="error" title="The assistant could not reply">
+          <Alert tone="error" title="The assistant could not start">
             <p>{sendError}</p>
             <p className="mt-1 text-xs">Your message is back in the box below; nothing was changed.</p>
           </Alert>
         )}
       </div>
 
-      <form onSubmit={onSubmit} className="shrink-0 space-y-2 border-t border-slate-200 bg-white p-3">
-        {hasPending && <p className="text-xs text-indigo-700">Suggestions above are not applied yet. The assistant works from the configuration as it is now.</p>}
-        <label htmlFor="studio-prompt" className="sr-only">
-          Message the assistant
-        </label>
-        <Textarea
-          id="studio-prompt"
-          ref={inputRef}
-          rows={proposals.length ? 3 : 5}
-          value={text}
-          maxLength={4000}
-          placeholder={proposals.length ? 'Ask for a change, e.g. “Make it 15 minutes” or “Add a question about pricing”' : 'Describe the scenario you want to build…'}
-          disabled={!!sending || draft.readOnly}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-500">🔒 Locked fields are never changed · ⌘/Ctrl + Enter to send</p>
-          <Button type="submit" size="sm" loading={!!sending} disabled={text.trim().length < 3 || draft.readOnly}>
-            Send
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function UserBubble({ text }: { text: string }) {
-  return (
-    <div className="flex justify-end">
-      <p className="max-w-[90%] whitespace-pre-wrap rounded-lg rounded-br-sm bg-brand-600 px-3 py-2 text-sm text-white" data-testid="user-message">
-        {text}
-      </p>
-    </div>
-  );
-}
-
-function AssistantBubble({ children, simulated }: { children: React.ReactNode; simulated?: boolean }) {
-  return (
-    <div className="max-w-full space-y-3 rounded-lg rounded-bl-sm border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-slate-500">Assistant</span>
-        {simulated && <SimulatedBadge what="Simulated drafter" />}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-const STATUS_TEXT: Record<string, string> = { APPLIED: 'Applied', PARTIAL: 'Partly applied', REJECTED: 'Discarded', STALE: 'Out of date' };
-
-function ChangeList({
-  proposal: p,
-  selected,
-  onToggle,
-  busy,
-  readOnly,
-  onApply,
-  onReject,
-  onGoto,
-}: {
-  proposal: Proposal;
-  selected: string[];
-  onToggle: (path: string, on: boolean) => void;
-  busy: boolean;
-  readOnly: boolean;
-  onApply: (paths: string[]) => void;
-  onReject: () => void;
-  onGoto: (path: string) => void;
-}) {
-  const pending = p.status === 'PENDING';
-  const all = p.changes.map((c) => c.path);
-  return (
-    <div className="space-y-2" data-testid="assistant-proposal">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-slate-600">
-          {pending ? `Proposed changes (${p.changes.length})` : `${STATUS_TEXT[p.status] ?? p.status}: ${p.status === 'PARTIAL' ? `${p.appliedPaths.length} of ${p.changes.length}` : p.changes.length} change${p.changes.length === 1 ? '' : 's'}`}
-        </p>
-        {!pending && <Badge tone={p.status === 'APPLIED' ? 'green' : p.status === 'PARTIAL' ? 'purple' : 'gray'}>{(STATUS_TEXT[p.status] ?? p.status).toLowerCase()}</Badge>}
-      </div>
-      <ul className="space-y-2">
-        {p.changes.map((c) => (
-          <ChangeItem
-            key={c.path}
-            change={c}
-            pending={pending}
-            checked={selected.includes(c.path)}
-            applied={p.appliedPaths.includes(c.path)}
-            onToggle={(on) => onToggle(c.path, on)}
-            onGoto={() => onGoto(c.path)}
-            disabled={busy || readOnly}
+      <div className="shrink-0 p-3">
+        <div className="rounded-xl border border-slate-300 bg-white shadow-sm focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500">
+          <label htmlFor="studio-prompt" className="sr-only">
+            Message the assistant
+          </label>
+          <textarea
+            id="studio-prompt"
+            ref={inputRef}
+            rows={proposals.length ? 3 : 4}
+            value={text}
+            maxLength={4000}
+            placeholder={proposals.length ? 'Describe how you’d like to edit your scenario…' : 'Describe the scenario you want to build…'}
+            disabled={draft.readOnly}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            className="block w-full resize-none rounded-t-xl border-0 bg-transparent px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
           />
-        ))}
-      </ul>
-      {pending && (
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onReject} disabled={busy}>
-            Discard
-          </Button>
-          {selected.length > 0 && selected.length < all.length && (
-            <Button variant="secondary" size="sm" onClick={() => onApply(selected)} loading={busy} disabled={readOnly}>
-              Apply selected ({selected.length})
-            </Button>
-          )}
-          <Button size="sm" onClick={() => onApply(all)} loading={busy && selected.length === all.length} disabled={readOnly || busy}>
-            Apply all ({all.length})
-          </Button>
+          <div className="flex items-center gap-1.5 px-2 pb-2">
+            <div className="relative">
+              <button type="button" onClick={() => setPlusOpen((v) => !v)} aria-expanded={plusOpen} aria-label="More options" className="grid h-7 w-7 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <Icon name="plus" />
+              </button>
+              {plusOpen && (
+                <div className="absolute bottom-full left-0 z-20 mb-1 w-56 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-50"
+                    onClick={() => {
+                      setPlusOpen(false);
+                      onOpenTemplates();
+                    }}
+                  >
+                    Start from a template or file…
+                  </button>
+                </div>
+              )}
+            </div>
+            <ModeChip icon="search" label="Deep Research" active={mode === 'deep'} onClick={() => setMode((m) => (m === 'deep' ? 'standard' : 'deep'))} help={MODE_HELP.deep} />
+            <ModeChip icon="bolt" label="Flash Mode" active={mode === 'flash'} onClick={() => setMode((m) => (m === 'flash' ? 'standard' : 'flash'))} help={MODE_HELP.flash} warm />
+            <div className="ml-auto">
+              {running ? (
+                <button type="button" onClick={stop} aria-label="Stop the assistant" title="Stop" className="grid h-8 w-8 place-items-center rounded-full bg-red-600 text-white hover:bg-red-700">
+                  <Icon name="stop" className="h-3.5 w-3.5" fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void send(text)}
+                  disabled={text.trim().length < 3 || working || draft.readOnly}
+                  aria-label="Send"
+                  title="Send (Enter)"
+                  className="grid h-8 w-8 place-items-center rounded-full bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-400"
+                >
+                  {starting ? <Spinner className="h-4 w-4" /> : <Icon name="arrowUp" />}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+        <p className="mt-1 px-1 text-[11px] text-slate-500">{MODE_HELP[mode]} 🔒 Locked fields are never changed.</p>
+      </div>
+    </div>
+  );
+}
+
+function ModeChip({ icon, label, active, onClick, help, warm }: { icon: 'search' | 'bolt'; label: string; active: boolean; onClick: () => void; help: string; warm?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={help}
+      className={clsx(
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
+        active ? (warm ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-brand-400 bg-brand-50 text-brand-800') : 'border-slate-200 text-slate-600 hover:bg-slate-50',
       )}
+    >
+      <Icon name={icon} className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function DateDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-slate-400">
+      <span className="h-px flex-1 bg-slate-200" />
+      {label}
+      <span className="h-px flex-1 bg-slate-200" />
+    </div>
+  );
+}
+
+function UserBubble({ text, time, initials }: { text: string; time: string; initials: string }) {
+  return (
+    <div className="flex items-end justify-end gap-2">
+      <div className="max-w-[88%] rounded-2xl rounded-br-sm border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm">
+        <p className="whitespace-pre-wrap" data-testid="user-message">
+          {text}
+        </p>
+        <p className="mt-1 text-right text-[10px] text-slate-400">{time}</p>
+      </div>
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-700" aria-hidden>
+        {initials}
+      </span>
+    </div>
+  );
+}
+
+function Working({ label, meta }: { label: string; meta?: string }) {
+  return (
+    <p className="flex items-center gap-2 text-sm text-slate-600" role="status" data-testid="agent-working">
+      <span className="flex gap-0.5" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-600" style={{ animationDelay: `${i * 120}ms` }} />
+        ))}
+      </span>
+      {label}
+      {meta && <span className="text-xs text-slate-400">{meta}</span>}
+    </p>
+  );
+}
+
+/** Group consecutive tool steps like "3 tools used". */
+function groupEvents(events: AgentEvent[]) {
+  const out: Array<{ kind: 'tools'; items: AgentEvent[] } | { kind: 'event'; ev: AgentEvent }> = [];
+  for (const ev of events) {
+    const last = out[out.length - 1];
+    if (ev.kind === 'tool') {
+      if (last?.kind === 'tools') last.items.push(ev);
+      else out.push({ kind: 'tools', items: [ev] });
+    } else out.push({ kind: 'event', ev });
+  }
+  return out;
+}
+
+function RunView({ run, now, busy, onUndo, onGoto, onAnswer }: { run: Proposal; now: number; busy: boolean; onUndo: () => void; onGoto: (path: string) => void; onAnswer: (q: string) => void }) {
+  const isRunning = run.status === 'RUNNING';
+  const started = new Date(run.createdAt).getTime();
+  const elapsed = (run.finishedAt ? new Date(run.finishedAt).getTime() : now) - started;
+  const byPath = new Map(run.changes.map((c) => [c.path, c]));
+  return (
+    <div className="space-y-2.5" data-testid="agent-run" data-status={run.status}>
+      <div className="flex items-center gap-2">
+        {run.simulated && <SimulatedBadge what="Simulated drafter" />}
+        {run.mode !== 'standard' && <Badge tone={run.mode === 'flash' ? 'yellow' : 'blue'}>{run.mode === 'flash' ? 'Flash Mode' : 'Deep Research'}</Badge>}
+      </div>
+      {groupEvents(run.events).map((g, i) =>
+        g.kind === 'tools' ? (
+          <Collapsible key={i} summary={`${g.items.length} tool${g.items.length === 1 ? '' : 's'} used`}>
+            <ul className="space-y-1">
+              {g.items.map((t, k) => (
+                <li key={k} className="flex gap-2 text-xs text-slate-600">
+                  <span className="text-emerald-600">✓</span>
+                  {t.text}
+                </li>
+              ))}
+            </ul>
+          </Collapsible>
+        ) : g.ev.kind === 'update' ? (
+          <Collapsible key={i} tone="green" summary={<span className="inline-flex items-center gap-1.5"><Icon name="checkCircle" className="h-4 w-4 text-emerald-600" />{g.ev.text.replace(/^.*: u/, 'U')}</span>} testId="run-update">
+            <ul className="space-y-2">
+              {(g.ev.paths ?? []).map((path) => {
+                const c = byPath.get(path);
+                return (
+                  <li key={path} className="text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800">{fieldLabel(path)}</span>
+                      <button type="button" className="text-brand-700 hover:underline" onClick={() => onGoto(path)}>
+                        Show field
+                      </button>
+                    </div>
+                    {c?.reason && <p className="text-slate-600">{c.reason}</p>}
+                    {c && <BeforeAfter change={c} />}
+                  </li>
+                );
+              })}
+            </ul>
+          </Collapsible>
+        ) : g.ev.kind === 'narration' ? (
+          <p key={i} className="whitespace-pre-wrap text-sm text-slate-800">
+            {g.ev.text}
+          </p>
+        ) : g.ev.kind === 'check' ? (
+          <p key={i} className="flex gap-2 text-xs text-slate-600" data-testid="run-check">
+            <span className={/need|attention/.test(g.ev.text) ? 'text-amber-600' : 'text-emerald-600'}>{/need|attention/.test(g.ev.text) ? '!' : '✓'}</span>
+            {g.ev.text}
+          </p>
+        ) : (
+          <p key={i} className="text-sm text-red-700">
+            {g.ev.text}
+          </p>
+        ),
+      )}
+
+      {isRunning ? (
+        <Working label="Thinking…" meta={`${fmtDuration(elapsed)} · ${run.events.length} steps`} />
+      ) : (
+        <>
+          {run.reply && (
+            <p className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800" data-testid="assistant-reply">
+              {run.reply}
+            </p>
+          )}
+          <LeftAlone preserved={run.preserved} onGoto={onGoto} />
+          {run.unsupported.length > 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900" data-testid="assistant-unsupported">
+              <p className="font-semibold">Not possible in the runtime</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {run.unsupported.map((u, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{u.request}</span> — {u.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {run.questions.length > 0 && (
+            <div className="space-y-1" data-testid="assistant-questions">
+              <p className="text-xs font-semibold text-slate-600">Open questions</p>
+              {run.questions.map((q, i) => (
+                <button key={i} type="button" onClick={() => onAnswer(q)} className="block w-full rounded border border-slate-200 bg-white px-2 py-1 text-left text-xs text-slate-700 hover:bg-slate-50" title="Answer in the message box">
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+          {run.dropped.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">{run.dropped.length} suggestion(s) were blocked by the safety checks</summary>
+              <ul className="list-disc pl-4">
+                {run.dropped.map((d, i) => (
+                  <li key={i}>
+                    {fieldLabel(d.path)}: {d.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <span data-testid="run-summary">
+              {fmtDuration(elapsed)} · {run.events.length} steps{run.status === 'UNDONE' ? ' · undone' : run.status === 'CANCELLED' ? ' · stopped' : run.status === 'FAILED' ? ' · did not finish' : ''}
+            </span>
+            {run.changes.length > 0 && ['DONE', 'CANCELLED', 'FAILED'].includes(run.status) && (
+              <Button variant="ghost" size="sm" onClick={onUndo} loading={busy} title="Put back the values from before this run">
+                <Icon name="undo" className="h-3.5 w-3.5" /> Undo changes
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Collapsible({ summary, children, tone, testId }: { summary: ReactNode; children: ReactNode; tone?: 'green'; testId?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={clsx('rounded-md border', tone === 'green' ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-white')} data-testid={testId}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-700">
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} className="h-3.5 w-3.5 text-slate-400" />
+        {summary}
+      </button>
+      {open && <div className="border-t border-slate-100 px-3 py-2">{children}</div>}
     </div>
   );
 }
@@ -413,61 +547,26 @@ function isShort(v: unknown) {
   return v === undefined || v === null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 80 && !v.includes('\n'));
 }
 
-function ChangeItem({
-  change: c,
-  pending,
-  checked,
-  applied,
-  onToggle,
-  onGoto,
-  disabled,
-}: {
-  change: Change;
-  pending: boolean;
-  checked: boolean;
-  applied: boolean;
-  onToggle: (on: boolean) => void;
-  onGoto: () => void;
-  disabled: boolean;
-}) {
-  const short = isShort(c.before) && isShort(c.after);
+function BeforeAfter({ change: c }: { change: Change }) {
+  if (isShort(c.before) && isShort(c.after)) {
+    return (
+      <p className="mt-0.5 break-words" data-testid={`change-${c.path}`}>
+        <span className="rounded bg-red-50 px-1 text-red-900 line-through decoration-red-300">{renderValue(c.before)}</span> → <span className="rounded bg-emerald-50 px-1 text-emerald-900">{renderValue(c.after)}</span>
+      </p>
+    );
+  }
   return (
-    <li className={clsx('rounded-md border p-2 text-xs', pending ? 'border-indigo-200 bg-indigo-50/40' : applied ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 opacity-70')} data-testid={`change-${c.path}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          {pending ? (
-            <Checkbox label={<span className="font-semibold text-slate-800">{fieldLabel(c.path)}</span>} checked={checked} disabled={disabled} onChange={onToggle} />
-          ) : (
-            <span className="font-semibold text-slate-800">
-              {applied ? '✓ ' : '– '}
-              {fieldLabel(c.path)}
-            </span>
-          )}
-          {c.reason && <p className="mt-0.5 text-slate-600">{c.reason}</p>}
-          {c.overwritesManual && <p className="mt-0.5 font-medium text-amber-800">Replaces text you wrote</p>}
-        </div>
-        <button type="button" className="shrink-0 text-brand-700 hover:underline" onClick={onGoto}>
-          Show field
-        </button>
+    <details className="mt-0.5" data-testid={`change-${c.path}`}>
+      <summary className="cursor-pointer text-slate-500">Before / after</summary>
+      <div className="mt-1 grid gap-1">
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-red-50 p-2 text-red-900" aria-label="Before">
+          {renderValue(c.before)}
+        </pre>
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-emerald-50 p-2 text-emerald-900" aria-label="After">
+          {renderValue(c.after)}
+        </pre>
       </div>
-      {short ? (
-        <p className="mt-1 break-words">
-          <span className="rounded bg-red-50 px-1 text-red-900 line-through decoration-red-300">{renderValue(c.before)}</span> → <span className="rounded bg-emerald-50 px-1 text-emerald-900">{renderValue(c.after)}</span>
-        </p>
-      ) : (
-        <details className="mt-1">
-          <summary className="cursor-pointer text-slate-600">Before / after</summary>
-          <div className="mt-1 grid gap-1">
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-red-50 p-2 text-red-900" aria-label="Before">
-              {renderValue(c.before)}
-            </pre>
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-emerald-50 p-2 text-emerald-900" aria-label="After">
-              {renderValue(c.after)}
-            </pre>
-          </div>
-        </details>
-      )}
-    </li>
+    </details>
   );
 }
 
@@ -475,12 +574,15 @@ function LeftAlone({ preserved, onGoto }: { preserved: Proposal['preserved']; on
   if (!preserved.length) return null;
   const locked = preserved.filter((x) => x.reason === 'locked');
   const mine = preserved.filter((x) => x.reason === 'creator');
-  const link = (path: string) => (
-    <button key={path} type="button" className="underline decoration-dotted hover:text-slate-900" onClick={() => onGoto(path)}>
-      {fieldLabel(path)}
-    </button>
-  );
-  const join = (items: Proposal['preserved']) => items.slice(0, 8).flatMap((x, i) => (i ? [', ', link(x.path)] : [link(x.path)]));
+  const join = (items: Proposal['preserved']) =>
+    items.slice(0, 8).flatMap((x, i) => {
+      const link = (
+        <button key={x.path} type="button" className="underline decoration-dotted hover:text-slate-900" onClick={() => onGoto(x.path)}>
+          {fieldLabel(x.path)}
+        </button>
+      );
+      return i ? [', ', link] : [link];
+    });
   return (
     <div className="space-y-0.5 text-xs text-slate-600" data-testid="assistant-left-alone">
       {locked.length > 0 && (
@@ -494,6 +596,70 @@ function LeftAlone({ preserved, onGoto }: { preserved: Proposal['preserved']; on
           <span className="font-semibold">✎ Kept your wording:</span> {join(mine)}
           {mine.length > 8 ? ` and ${mine.length - 8} more` : ''}
         </p>
+      )}
+    </div>
+  );
+}
+
+function ReviewProposal({
+  p,
+  selected,
+  onToggle,
+  busy,
+  readOnly,
+  onApply,
+  onReject,
+  onGoto,
+}: {
+  p: Proposal;
+  selected: string[];
+  onToggle: (path: string, on: boolean) => void;
+  busy: boolean;
+  readOnly: boolean;
+  onApply: (paths: string[]) => void;
+  onReject: () => void;
+  onGoto: (path: string) => void;
+}) {
+  const pending = p.status === 'PENDING';
+  const all = p.changes.map((c) => c.path);
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3" data-testid="assistant-proposal">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-slate-500">Suggestion from the classic editor</span>
+        {p.simulated && <SimulatedBadge what="Simulated drafter" />}
+      </div>
+      {p.reply && <p className="whitespace-pre-wrap text-sm text-slate-800">{p.reply}</p>}
+      <ul className="space-y-2">
+        {p.changes.map((c) => (
+          <li key={c.path} className="rounded-md border border-slate-200 p-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              {pending ? (
+                <Checkbox label={<span className="font-semibold">{fieldLabel(c.path)}</span>} checked={selected.includes(c.path)} disabled={busy || readOnly} onChange={(on) => onToggle(c.path, on)} />
+              ) : (
+                <span className="font-semibold">
+                  {p.appliedPaths.includes(c.path) ? '✓ ' : '– '}
+                  {fieldLabel(c.path)}
+                </span>
+              )}
+              <button type="button" className="text-brand-700 hover:underline" onClick={() => onGoto(c.path)}>
+                Show field
+              </button>
+            </div>
+            <BeforeAfter change={c} />
+          </li>
+        ))}
+      </ul>
+      {pending ? (
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onReject} disabled={busy}>
+            Discard
+          </Button>
+          <Button size="sm" onClick={() => onApply(selected.length ? selected : all)} loading={busy} disabled={readOnly || !selected.length}>
+            Apply {selected.length === all.length ? 'all' : 'selected'} ({selected.length})
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-500">{p.status.toLowerCase().replace('_', ' ')}</p>
       )}
     </div>
   );

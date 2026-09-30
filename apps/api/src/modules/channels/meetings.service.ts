@@ -19,6 +19,9 @@ import { ChannelProvidersService, RECALL_MISSING, type RecallCreds } from './cha
 import { transitionMeetingSession } from './meeting-session';
 import { MEETING_BOT_MODES, mapRecallStatus, meetingPlatform, recallBotRequest, utteranceFromTranscriptEvent, verifySvixSignature, type MeetingBotMode } from './recall/recall';
 
+/** Agent bot page diagnostics event. */
+export const BotPageEvent = z.object({ event: z.string().trim().min(1).max(40), data: z.record(z.unknown()).optional() }).strict();
+
 export const CreateMeetingBotBody = z
   .object({
     scenarioId: z.string().min(1).max(64),
@@ -389,11 +392,18 @@ export class MeetingsService implements OnModuleInit {
 
   async applyStatus(bot: MeetingBot, code: string, subCode: string | null) {
     const mapped = mapRecallStatus(code);
+    // Every distinct Recall status (waiting room, admitted, …) goes on the session timeline for diagnosis.
+    if (bot.sessionId && code !== this.lastRecallCode.get(bot.id)) {
+      this.lastRecallCode.set(bot.id, code);
+      await this.prisma.sessionEvent
+        .create({ data: { sessionId: bot.sessionId, type: 'meeting.bot_status', payload: { code, subCode, mapped } } })
+        .catch(() => undefined);
+    }
     if (!mapped || bot.status === 'CANCELLED') return;
     if (bot.status === mapped && mapped !== 'COMPLETED') return;
     await this.prisma.meetingBot.update({
       where: { id: bot.id },
-      data: { status: mapped, ...(mapped === 'FAILED' ? { lastError: `Recall.ai: ${code}${subCode ? ` (${subCode})` : ''}` } : {}) },
+      data: { status: mapped, lastEventAt: new Date(), ...(mapped === 'FAILED' ? { lastError: `Recall.ai: ${code}${subCode ? ` (${subCode})` : ''}` } : {}) },
     });
     if (!bot.sessionId) return;
     const s = await this.prisma.session.findUnique({ where: { id: bot.sessionId } });
@@ -437,18 +447,66 @@ export class MeetingsService implements OnModuleInit {
   async poll(botId: string) {
     const bot = await this.prisma.meetingBot.findUnique({ where: { id: botId } });
     if (!bot || TERMINAL_BOT.has(bot.status) || !bot.providerBotId) return;
+    await this.refreshFromRecall(bot);
+    const fresh = await this.prisma.meetingBot.findUnique({ where: { id: botId } });
+    if (fresh && !TERMINAL_BOT.has(fresh.status)) await this.schedulePoll(botId);
+  }
+
+  /** Ask Recall for the bot's latest status and apply it. Returns the Recall status code, if any. */
+  private async refreshFromRecall(bot: MeetingBot): Promise<string | null> {
     const creds = await this.providers.recall(bot.workspaceId);
-    if (!creds) return;
+    if (!creds || !bot.providerBotId) return null;
     try {
       const data = await this.recallFetch<any>(creds, 'GET', `/bot/${encodeURIComponent(bot.providerBotId)}/`);
       const changes: Array<{ code: string; sub_code?: string | null }> = Array.isArray(data?.status_changes) ? data.status_changes : [];
       const last = changes[changes.length - 1];
       if (last?.code) await this.applyStatus(bot, last.code, last.sub_code ?? null);
+      return last?.code ?? null;
     } catch (e: any) {
-      this.logger.warn(`Recall poll for ${bot.id} failed: ${e?.message}`);
+      this.logger.warn(`Recall status for ${bot.id} failed: ${e?.message}`);
+      return null;
     }
-    const fresh = await this.prisma.meetingBot.findUnique({ where: { id: botId } });
-    if (fresh && !TERMINAL_BOT.has(fresh.status)) await this.schedulePoll(botId);
+  }
+
+  // ───────────────────────── agent bot page (session token) ─────────────────────────
+
+  private readonly lastRecallCode = new Map<string, string>();
+  private readonly lastPageRefresh = new Map<string, number>();
+
+  /**
+   * For the agent bot page: is the bot in the meeting yet? The page starts the practice session (and the
+   * persona greets) once the bot is admitted. While the bot is joining, Recall is asked directly at most
+   * every 3 s instead of waiting for the 60 s poll.
+   */
+  async botStatusForPage(sessionId: string, token: string) {
+    await this.sessions.verifySessionToken(sessionId, token);
+    let bot = await this.prisma.meetingBot.findFirst({ where: { sessionId } });
+    if (!bot) return { status: null, recallStatus: null };
+    let recallStatus = this.lastRecallCode.get(bot.id) ?? null;
+    const last = this.lastPageRefresh.get(bot.id) ?? 0;
+    if (!TERMINAL_BOT.has(bot.status) && bot.status !== 'IN_CALL' && Date.now() - last > 3000) {
+      this.lastPageRefresh.set(bot.id, Date.now());
+      recallStatus = (await this.refreshFromRecall(bot)) ?? recallStatus;
+      bot = (await this.prisma.meetingBot.findUnique({ where: { id: bot.id } })) ?? bot;
+    }
+    return { status: bot.status, recallStatus };
+  }
+
+  /** Diagnostics from the agent bot page (audio levels, start trigger, errors), kept on the session timeline. */
+  async logPageEvent(sessionId: string, token: string, body: { event: string; data?: Record<string, unknown> }) {
+    await this.sessions.verifySessionToken(sessionId, token);
+    const count = await this.prisma.sessionEvent.count({ where: { sessionId, type: 'bot.page' } });
+    if (count >= 120) return { ok: true, dropped: true };
+    // Flat, small, primitive values only: this is diagnostics from an unauthenticated-by-user page.
+    const data: Record<string, string | number | boolean | null> = {};
+    for (const [k, v] of Object.entries(body.data ?? {}).slice(0, 20)) {
+      if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(k)) continue;
+      if (typeof v === 'number') data[k] = Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null;
+      else if (typeof v === 'boolean' || v === null) data[k] = v;
+      else if (typeof v === 'string') data[k] = v.slice(0, 200);
+    }
+    await this.prisma.sessionEvent.create({ data: { sessionId, type: 'bot.page', payload: { event: body.event.slice(0, 40), data } } });
+    return { ok: true };
   }
 }
 

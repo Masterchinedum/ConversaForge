@@ -128,7 +128,7 @@ export function ClassicEditor({ scenarioId }: { scenarioId: string }) {
     try {
       const d = await api<ScenarioDetail>(wsPath('/scenarios'), { method: 'POST', body: { source: 'duplicate', scenarioId: s.id } });
       toast.success('Duplicated');
-      router.push(href(`/scenarios/${d.scenario.id}`));
+      router.push(href(`/scenarios/${d.scenario.id}/studio`));
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -156,15 +156,15 @@ export function ClassicEditor({ scenarioId }: { scenarioId: string }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <Link href={href('/scenarios')} className="text-xs text-slate-500 hover:text-slate-800">
-                ← Scenarios
+              <Link href={href(`/scenarios/${scenarioId}`)} className="text-xs text-slate-500 hover:text-slate-800">
+                ← Scenario
               </Link>
               <div role="group" aria-label="Editor mode" className="inline-flex rounded-md border border-slate-300 p-0.5 text-xs">
-                <Link href={href(`/scenarios/${scenarioId}`)} aria-pressed="false" className="rounded px-2 py-0.5 text-slate-700 hover:bg-slate-100" onClick={(e) => { e.preventDefault(); void flush().then(() => router.push(href(`/scenarios/${scenarioId}`))); }}>
+                <Link href={href(`/scenarios/${scenarioId}/studio`)} aria-pressed="false" className="rounded px-2 py-0.5 text-slate-700 hover:bg-slate-100" onClick={(e) => { e.preventDefault(); void flush().then(() => router.push(href(`/scenarios/${scenarioId}/studio`))); }}>
                   AI Studio
                 </Link>
                 <span aria-pressed="true" className="rounded bg-brand-600 px-2 py-0.5 font-medium text-white">
-                  Classic
+                  Legacy
                 </span>
               </div>
             </div>

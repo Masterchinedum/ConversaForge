@@ -13,6 +13,7 @@ import type { Principal } from '../../common/auth/principal';
 import { creatorWrittenPaths, DraftAssistantService, sanitizeProposal } from './draft-assistant.service';
 import { GalleryService } from './gallery.service';
 import { ScenariosService } from './scenarios.service';
+import { StudioAgentService } from './studio-agent.service';
 
 const prisma = new PrismaService();
 const audit = { log: jest.fn(async () => undefined) } as any;
@@ -22,6 +23,15 @@ const rateLimit = { enforce: jest.fn(async () => ({ allowed: true })) } as any;
 const scenarios = new ScenariosService(prisma, audit);
 const assistant = new DraftAssistantService(prisma, llm, usage, rateLimit, scenarios);
 const gallery = new GalleryService(prisma);
+let knowledgeResults: unknown[] = [];
+let knowledgeDelayMs = 0;
+const knowledge = {
+  search: jest.fn(async () => {
+    if (knowledgeDelayMs) await new Promise((r) => setTimeout(r, knowledgeDelayMs));
+    return knowledgeResults;
+  }),
+} as any;
+const agent = new StudioAgentService(prisma, llm, usage, rateLimit, scenarios, assistant, knowledge);
 
 const run = Date.now().toString(36);
 let ws1: string;
@@ -515,6 +525,115 @@ describe('Scenario Studio', () => {
     expect(manual.has('basics.publicDescription')).toBe(false); // still the assistant's text
     expect(manual.has('instructions.tone')).toBe(true); // the assistant's text, since edited by the creator
     expect(manual.has('rubric')).toBe(false); // default
+  });
+});
+
+
+describe('Scenario Studio agent runs', () => {
+  const brief = 'A 12-minute behavioral interview for a data analyst role. Ask about SQL. Never ask about salary.';
+  const run = async (id: string, instruction: string, mode: 'standard' | 'flash' | 'deep' = 'standard') => {
+    const started = await agent.start(ws1, p1, id, { instruction, mode });
+    expect(started.status).toBe('RUNNING');
+    await agent.waitFor(started.id);
+    return agent.get(ws1, id, started.id);
+  };
+
+  it('standard: drafts, expands the AI instructions, checks, and records every step', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const r = await run(d.scenario.id, brief);
+    expect(r.status).toBe('DONE');
+    expect(r.mode).toBe('standard');
+    const kinds = (r.events as Array<{ kind: string; text: string }>).map((e) => e.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['narration', 'tool', 'update', 'check']));
+    const texts = (r.events as Array<{ text: string }>).map((e) => e.text);
+    expect(texts.some((t) => /Expanded the AI instructions: updated 1 field/.test(t))).toBe(true);
+    expect(texts[texts.length - 1]).toMatch(/^Ready to publish/);
+    const detail = await scenarios.detail(ws1, d.scenario.id);
+    const cfg = detail.draft.config as ScenarioConfig;
+    expect(cfg.instructions.aiInstructions).toMatch(/## FLOW/);
+    expect(cfg.instructions.aiInstructions).toMatch(/Never ask about salary/);
+    expect(detail.canPublish).toBe(true);
+    // Every applied change keeps the value from before the run (for undo).
+    const ai = r.changes.find((c) => c.path === 'instructions.aiInstructions')!;
+    expect(ai.before).toBe('');
+    expect(r.reply).toBeTruthy();
+  });
+
+  it('flash: one pass and a check, no follow-up passes', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const r = await run(d.scenario.id, brief, 'flash');
+    expect(r.status).toBe('DONE');
+    const texts = (r.events as Array<{ text: string }>).map((e) => e.text);
+    expect(texts.some((t) => /Expanded the AI instructions/.test(t))).toBe(false);
+    expect(((await scenarios.detail(ws1, d.scenario.id)).draft.config as ScenarioConfig).instructions.aiInstructions).not.toMatch(/## FLOW/);
+  });
+
+  it('deep: searches the knowledge base first', async () => {
+    knowledgeResults = [{ chunkId: 'c1', documentId: 'd1', documentTitle: 'Analyst handbook', page: 1, heading: null, text: 'Analysts use SQL daily.', snippet: 'Analysts use «SQL» daily.', score: 1 }];
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const r = await run(d.scenario.id, brief, 'deep');
+    knowledgeResults = [];
+    expect(r.status).toBe('DONE');
+    const texts = (r.events as Array<{ text: string }>).map((e) => e.text);
+    expect(texts).toContain('Searched the knowledge base: 1 excerpt from Analyst handbook');
+    expect(texts.some((t) => /Reviewing the whole draft/.test(t))).toBe(true);
+  });
+
+  it('never writes locked fields and keeps the creator’s edits', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio', config: { basics: { name: 'My own name' } }, lockedFields: ['rubric'] });
+    const r = await run(d.scenario.id, brief);
+    const cfg = (await scenarios.detail(ws1, d.scenario.id)).draft.config as ScenarioConfig;
+    expect(cfg.basics.name).toBe('My own name');
+    expect(cfg.rubric.criteria).toEqual([]);
+    expect(r.changes.map((c) => c.path)).not.toContain('rubric');
+    expect(r.preserved).toEqual(expect.arrayContaining([{ path: 'rubric', reason: 'locked' }, { path: 'basics.name', reason: 'creator' }]));
+  });
+
+  it('refuses a second run while one is working, and can be stopped', async () => {
+    knowledgeDelayMs = 400;
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const started = await agent.start(ws1, p1, d.scenario.id, { instruction: brief, mode: 'deep' });
+    await expectCode(agent.start(ws1, p1, d.scenario.id, { instruction: 'again', mode: 'flash' }), 409, 'agent_busy');
+    await agent.cancel(ws1, d.scenario.id, started.id);
+    await agent.waitFor(started.id);
+    knowledgeDelayMs = 0;
+    const r = await agent.get(ws1, d.scenario.id, started.id);
+    expect(r.status).toBe('CANCELLED');
+    expect(r.changes).toEqual([]);
+    expect(((await scenarios.detail(ws1, d.scenario.id)).draft.config as ScenarioConfig).persona.role).toBe('');
+  });
+
+  it('undo restores what the run changed, except fields edited since', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const r = await run(d.scenario.id, brief);
+    const cur = await scenarios.detail(ws1, d.scenario.id);
+    await scenarios.updateDraft(ws1, p1, d.scenario.id, { revision: cur.draft.revision, patch: [{ path: 'persona.name', value: 'Mine now' }] });
+    const u = await agent.undo(ws1, p1, d.scenario.id, r.id);
+    expect(u.skipped).toContain('persona.name');
+    expect(u.reverted).toContain('conversation.agenda');
+    const cfg = u.scenario.draft.config as ScenarioConfig;
+    expect(cfg.persona.name).toBe('Mine now');
+    expect(cfg.conversation.agenda).toEqual([]);
+    expect(u.run.status).toBe('UNDONE');
+    await expectCode(agent.undo(ws1, p1, d.scenario.id, r.id), 409);
+  });
+
+  it('stops a run this server is not executing (e.g. after a restart) right away', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    const orphan = await prisma.draftAssistantProposal.create({
+      data: { scenarioId: d.scenario.id, workspaceId: ws1, draftRevision: 1, instruction: 'x', changes: [], appliedPaths: [], status: 'RUNNING', mode: 'standard', events: [{ at: new Date().toISOString(), kind: 'narration', text: 'Working' }] },
+    });
+    await expectCode(agent.start(ws1, p1, d.scenario.id, { instruction: brief, mode: 'flash' }), 409, 'agent_busy');
+    const r = await agent.cancel(ws1, d.scenario.id, orphan.id);
+    expect(r.status).toBe('CANCELLED');
+    expect((r.events as Array<{ text: string }>).pop()!.text).toMatch(/^Stopped\. Nothing was changed/);
+    const next = await run(d.scenario.id, brief, 'flash');
+    expect(next.status).toBe('DONE');
+  });
+
+  it('is scoped to the workspace', async () => {
+    const d = await scenarios.create(ws1, p1, { source: 'studio' });
+    await expectCode(agent.start(ws2, p2, d.scenario.id, { instruction: brief, mode: 'flash' }), 404);
   });
 });
 

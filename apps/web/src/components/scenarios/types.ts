@@ -16,6 +16,9 @@ export interface ScenarioRow {
   latestPublishedAt?: string | null;
   draftHasUnpublishedChanges?: boolean;
   sessionCount?: number;
+  personaName?: string | null;
+  avatarUrl?: string | null;
+  accentColor?: string | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
@@ -58,6 +61,13 @@ export interface DiffResponse {
   changes: FieldChange[];
 }
 
+export interface AgentEvent {
+  at: string;
+  kind: 'narration' | 'tool' | 'update' | 'check' | 'error';
+  text: string;
+  paths?: string[];
+}
+
 export interface Proposal {
   id: string;
   /** The creator's message. */
@@ -71,7 +81,11 @@ export interface Proposal {
   preserved: Array<{ path: string; reason: 'locked' | 'creator' }>;
   changes: Array<{ path: string; before: unknown; after: unknown; reason: string; overwritesManual?: boolean }>;
   dropped: Array<{ path: string; reason: string }>;
-  status: 'PENDING' | 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'STALE' | 'NO_CHANGES';
+  status: 'PENDING' | 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'STALE' | 'NO_CHANGES' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELLED' | 'UNDONE';
+  /** "review" = a proposal to apply; "standard" | "flash" | "deep" = a Studio agent run that edits the draft. */
+  mode: 'review' | 'standard' | 'flash' | 'deep';
+  events: AgentEvent[];
+  finishedAt: string | null;
   appliedPaths: string[];
   provider: string | null;
   model: string | null;

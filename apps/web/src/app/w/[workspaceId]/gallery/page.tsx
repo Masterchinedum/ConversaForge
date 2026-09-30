@@ -22,7 +22,7 @@ export default function WorkspaceGalleryPage() {
     setBusy(id);
     try {
       const d = await api<ScenarioDetail>(wsPath('/scenarios'), { method: 'POST', body });
-      router.push(href(`/scenarios/${d.scenario.id}`));
+      router.push(href(`/scenarios/${d.scenario.id}/studio`));
     } catch (e) {
       toast.error(errorMessage(e));
       setBusy(null);

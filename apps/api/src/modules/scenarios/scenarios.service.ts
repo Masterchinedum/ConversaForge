@@ -158,6 +158,7 @@ export class ScenariosService {
       data: page.map((r) => {
         const latest = r.latestVersionId ? byId.get(r.latestVersionId) : undefined;
         const draftHash = r.draft ? draftPublishHash(r.draft.config) : null;
+        const persona = (r.draft?.config as { persona?: { name?: string; avatar?: { kind?: string; imageUrl?: string; accentColor?: string } } } | undefined)?.persona;
         return {
           id: r.id,
           slug: r.slug,
@@ -175,6 +176,10 @@ export class ScenariosService {
           draftRevision: r.draft?.revision ?? null,
           draftHasUnpublishedChanges: !latest || draftHash !== latest.configHash,
           sessionCount: r._count.sessions,
+          // For library cards (from the draft; never exposed publicly).
+          personaName: typeof persona?.name === 'string' && persona.name.trim() ? persona.name.trim().slice(0, 80) : null,
+          avatarUrl: persona?.avatar?.kind === 'image' && typeof persona.avatar.imageUrl === 'string' ? persona.avatar.imageUrl : null,
+          accentColor: typeof persona?.avatar?.accentColor === 'string' ? persona.avatar.accentColor : null,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           archivedAt: r.archivedAt,

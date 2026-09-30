@@ -29,13 +29,27 @@ function AiMark({ path }: { path: string }) {
   const { aiMark } = useEditor();
   const mark = aiMark?.(path);
   if (!mark) return null;
+  if (mark === 'ai') {
+    return (
+      <span data-testid={`ai-mark-${path}`} className="inline-flex text-brand-600" title="Written by the assistant (unchanged since)">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+          <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-4-9 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="sr-only">Written by the assistant</span>
+      </span>
+    );
+  }
+  const text = { pending: 'AI suggestion', updated: 'AI updated', working: 'AI draft' }[mark];
   return (
     <span
       data-testid={`ai-mark-${path}`}
-      className={clsx('rounded px-1.5 py-0.5 text-[10px] font-medium', mark === 'pending' ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-100 text-emerald-800')}
-      title={mark === 'pending' ? 'The assistant suggests a change here (see the conversation)' : 'Updated by the assistant'}
+      className={clsx(
+        'rounded px-1.5 py-0.5 text-[10px] font-medium',
+        mark === 'pending' ? 'bg-indigo-100 text-indigo-800' : mark === 'working' ? 'animate-pulse bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800',
+      )}
+      title={mark === 'pending' ? 'The assistant suggests a change here (see the conversation)' : mark === 'working' ? 'The assistant is still working on this field' : 'Updated by the assistant'}
     >
-      {mark === 'pending' ? 'AI suggestion' : 'AI updated'}
+      {text}
     </span>
   );
 }

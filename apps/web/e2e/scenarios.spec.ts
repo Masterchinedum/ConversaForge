@@ -21,17 +21,18 @@ test('scenario authoring journey', async ({ page }) => {
   const me = await (await page.request.get('/api/auth/me')).json();
   const ws = me.workspaces[0].id as string;
 
-  // Library → new blank scenario
+  // Library → Create Scenario → Templates & import → blank scenario (this journey covers the legacy editor;
+  // the AI-first flow is in scenario-studio.spec.ts).
   await page.goto(`/w/${ws}/scenarios`);
-  await page.getByTestId('new-scenario').click();
+  await page.getByTestId('create-scenario').click();
+  await page.getByRole('button', { name: 'Templates & import' }).click();
+  await page.getByRole('tab', { name: 'Blank' }).click();
   await page.getByRole('dialog').getByLabel('Name').fill('E2E discovery call');
   await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
-  await page.waitForURL(new RegExp(`/w/${ws}/scenarios/[a-z0-9]+$`));
-  const scenarioId = page.url().split('/').pop()!;
-  // Scenarios open in Scenario Studio (see scenario-studio.spec.ts); this journey covers the classic editor.
-  await expect(page.getByRole('heading', { name: 'Scenario Studio' })).toBeVisible();
-  await page.getByRole('button', { name: 'Classic' }).click();
-  await page.waitForURL(/view=classic/);
+  await page.waitForURL(new RegExp(`/w/${ws}/scenarios/[a-z0-9]+/studio$`));
+  const scenarioId = page.url().split('/').slice(-2)[0]!;
+  await page.getByRole('button', { name: 'Legacy' }).click();
+  await page.waitForURL(/\/legacy$/);
   await expect(page.getByTestId('scenario-title')).toHaveText('E2E discovery call');
 
   // Lock the name, then ask the drafting assistant (local simulator)
@@ -105,15 +106,14 @@ test('scenario authoring journey', async ({ page }) => {
 
   // Library shows the scenario with unpublished changes
   await page.goto(`/w/${ws}/scenarios`);
-  const row = page.getByRole('row', { name: /E2E discovery call \(yaml\)/ });
-  await expect(row).toContainText('Published v3');
-  await expect(row).toContainText('Unpublished changes');
+  const card = page.getByTestId('scenario-card').filter({ hasText: 'E2E discovery call (yaml)' });
+  await expect(card).toContainText('v3 · edited');
 
   // Workspace gallery → template → editor
   await page.goto(`/w/${ws}/gallery`);
   await expect(page.getByRole('heading', { name: 'Starter templates' })).toBeVisible();
   await page.getByTestId('gallery-card-coaching-session').getByRole('button', { name: 'Use template' }).click();
-  await page.waitForURL(/\/scenarios\/[a-z0-9]+$/);
+  await page.waitForURL(/\/scenarios\/[a-z0-9]+\/studio$/);
   await expect(page.getByTestId('scenario-title')).toHaveText('Active listening coaching');
 
   // Public gallery renders templates without login-only data

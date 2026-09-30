@@ -11,7 +11,7 @@ export interface EditorCtx {
   issues: ValidationIssue[];
   workspaceId: string;
   /** Scenario Studio: whether the assistant has a pending suggestion for, or just updated, a lockable field. */
-  aiMark?: (path: string) => 'pending' | 'updated' | null;
+  aiMark?: (path: string) => 'pending' | 'updated' | 'working' | 'ai' | null;
 }
 
 export const EditorContext = createContext<EditorCtx | null>(null);

@@ -169,11 +169,11 @@ function OptionalText({ path, label, placeholder }: { path: string; label: strin
   );
 }
 
-export function InstructionsSection({ advanced = true }: { advanced?: boolean }) {
+export function InstructionsSection({ advanced = true, ai = true }: { advanced?: boolean; ai?: boolean }) {
   return (
     <Group title="Instructions & goals" id="sec-instructions">
       <StringListField path="instructions.goals" label="Goals" required placeholder="What should this conversation achieve?" addLabel="Add goal" />
-      <TextAreaField path="instructions.aiInstructions" label="AI instructions" rows={6} hint="How the AI should behave. Prose is preserved verbatim." />
+      {ai && <TextAreaField path="instructions.aiInstructions" label="AI instructions" rows={6} hint="How the AI should behave. Prose is preserved verbatim." />}
       <StringListField path="instructions.boundaries" label="Boundaries" placeholder="Something the AI must never do" addLabel="Add boundary" />
       {advanced && (
         <div className={grid}>

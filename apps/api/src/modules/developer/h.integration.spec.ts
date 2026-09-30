@@ -558,9 +558,11 @@ d('Developer platform, webhooks & channels (integration)', () => {
     }
     const calls: Array<{ url: string; init: any }> = [];
     let n = 0;
+    let recallCodes: string[] = [];
     meetings.fetchImpl = (async (url: string, init: any) => {
       calls.push({ url, init });
       if (init.method === 'POST' && url.endsWith('/bot/')) return new Response(JSON.stringify({ id: `bot_agent_${++n}` }), { status: 201 });
+      if (init.method === 'GET' && /\/bot\/bot_agent_\d+\/$/.test(url)) return new Response(JSON.stringify({ status_changes: recallCodes.map((code) => ({ code })) }), { status: 200 });
       return new Response(JSON.stringify({}), { status: 200 });
     }) as any;
     const practice = (payload: unknown, token = userToken) =>
@@ -596,8 +598,27 @@ d('Developer platform, webhooks & channels (integration)', () => {
     expect(boot.statusCode).toBe(200);
     expect(boot.json().consent.given).toBeTruthy();
 
+    // The bot page asks whether the bot is in the meeting yet (Recall is asked directly, throttled); the
+    // persona greets once it is admitted. Each Recall status lands on the session timeline.
+    const status = (tok = pageToken) => inject({ method: 'GET', url: `/api/channels/meeting-bots/session/${bot.sessionId}/status`, headers: auth(tok) });
+    expect((await status('cfs_wrong')).statusCode).toBe(401);
+    recallCodes = ['joining_call', 'in_waiting_room'];
+    expect((await status()).json()).toEqual({ status: 'JOINING', recallStatus: 'in_waiting_room' });
+    (meetings as any).lastPageRefresh.clear();
+    recallCodes = ['joining_call', 'in_waiting_room', 'in_call_not_recording'];
+    expect((await status()).json()).toEqual({ status: 'IN_CALL', recallStatus: 'in_call_not_recording' });
+    const timeline = await prisma.sessionEvent.findMany({ where: { sessionId: bot.sessionId, type: 'meeting.bot_status' }, orderBy: { createdAt: 'asc' } });
+    expect(timeline.map((e: any) => e.payload.code)).toEqual(['in_waiting_room', 'in_call_not_recording']);
+    // Page diagnostics: session-token only, flat primitive values, capped.
+    const diag = (payload: unknown, tok = pageToken) => inject({ method: 'POST', url: `/api/channels/meeting-bots/session/${bot.sessionId}/diagnostics`, headers: { ...json, ...auth(tok) }, payload });
+    expect((await diag({ event: 'level', data: {} }, 'cfs_wrong')).statusCode).toBe(401);
+    expect((await diag({ event: 'level', data: { peak: 0.123456, audioContext: 'running', nested: { x: 1 }, 'bad key': 1, long: 'x'.repeat(500) } })).statusCode).toBe(200);
+    const logged = await prisma.sessionEvent.findFirst({ where: { sessionId: bot.sessionId, type: 'bot.page' } });
+    expect(logged!.payload).toEqual({ event: 'level', data: { peak: 0.1235, audioContext: 'running', long: 'x'.repeat(200) } });
+    recallCodes = [];
+
     // Members read their own bots only; realtime transcript webhooks are ignored for agents.
-    expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${bot.id}`, headers: auth(userToken) })).json().status).toBe('JOINING');
+    expect((await inject({ method: 'GET', url: `/api/workspaces/${wsA}/scenarios/${scenarioId}/meeting-bots/${bot.id}`, headers: auth(userToken) })).json().status).toBe('IN_CALL');
     const hook = new URL(meetings.realtimeEndpointUrl(bot.id));
     await inject({
       method: 'POST',

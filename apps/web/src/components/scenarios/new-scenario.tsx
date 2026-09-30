@@ -30,7 +30,7 @@ export function NewScenarioModal({ open, onClose, wsPath, href, initialTemplate 
             : { source: 'import', text, format: 'auto', ...(name.trim() ? { name: name.trim() } : {}) };
       const d = await api<ScenarioDetail>(wsPath('/scenarios'), { method: 'POST', body });
       onClose();
-      router.push(href(`/scenarios/${d.scenario.id}`));
+      router.push(href(`/scenarios/${d.scenario.id}/studio`));
     } catch (e) {
       setError(errorMessage(e));
     } finally {

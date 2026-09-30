@@ -11,7 +11,7 @@ import { fetchBootstrap, type LiveBootstrap } from '@/lib/live/runtime-api';
 import { transcriptRows } from '@/lib/live/store';
 import { readSessionToken } from '@/lib/live/token';
 import { useLiveCall, type CallDevices } from '@/lib/live/use-live-call';
-import { errorMessage } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 import { isTerminal, LIVE_STATES, type SessionState } from '@cf/shared';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentAvatar } from './AgentAvatar';
@@ -25,8 +25,16 @@ type Phase =
   | { k: 'ended'; state: SessionState | null };
 
 /** RMS level (0..1) the meeting audio must exceed, and for how long, to count as someone speaking. */
-const SPEECH_RMS = 0.02;
+const SPEECH_RMS = 0.01;
 const SPEECH_HOLD_MS = 300;
+/** After Recall reports the bot in the call, give the meeting audio a moment before the persona greets. */
+const ADMITTED_GREET_DELAY_MS = 1500;
+
+type BotStatus = { status: string | null; recallStatus: string | null };
+
+function diag(sessionId: string, token: string, event: string, data: Record<string, unknown> = {}) {
+  void api(`/channels/meeting-bots/session/${encodeURIComponent(sessionId)}/diagnostics`, { method: 'POST', token, body: { event, data } }).catch(() => undefined);
+}
 
 export function BotApp({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
@@ -48,9 +56,20 @@ export function BotApp({ sessionId }: { sessionId: string }) {
         setBoot(b);
         if (isTerminal(b.state)) return setPhase({ k: 'ended', state: b.state });
         const d = await meetingDevices().catch((e) => {
+          diag(sessionId, t, 'no_audio', { message: String((e as Error)?.message ?? e) });
           throw new Error(`Could not hear the meeting (${(e as Error)?.message || 'no audio input'}). This page only works inside the meeting bot.`);
         });
         if (cancelled) return release(d);
+        const track = d.micStream?.getAudioTracks()[0];
+        const st = track?.getSettings();
+        diag(sessionId, t, 'loaded', {
+          audioContext: d.audioContext?.state ?? 'none',
+          sampleRate: d.audioContext?.sampleRate ?? 0,
+          trackLabel: track?.label ?? '',
+          trackMuted: track?.muted ?? null,
+          channelCount: st?.channelCount ?? null,
+          echoCancellation: st?.echoCancellation ?? null,
+        });
         setDevices(d);
         // Page reloaded mid-call: rejoin at once instead of waiting for speech.
         const live = (LIVE_STATES as readonly string[]).includes(b.state) || b.state === 'CONNECTING';
@@ -65,11 +84,47 @@ export function BotApp({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
-  // Waiting in the meeting: start once somebody talks.
+  // Waiting in the meeting: start once the bot is admitted (the persona greets) or somebody talks.
+  const [bot, setBot] = useState<BotStatus | null>(null);
+  const startCall = (trigger: string, extra: Record<string, unknown> = {}) => {
+    if (token) diag(sessionId, token, 'start', { trigger, ...extra });
+    setPhase((p) => (p.k === 'waiting' ? { k: 'call' } : p));
+  };
   useEffect(() => {
     if (phase.k !== 'waiting' || !devices?.micStream || !devices.audioContext) return;
-    return onSpeech(devices.audioContext, devices.micStream, () => setPhase({ k: 'call' }));
+    return onSpeech(devices.audioContext, devices.micStream, (rms) => startCall('speech', { rms }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase.k, devices]);
+  useEffect(() => {
+    if (phase.k !== 'waiting' || !token) return;
+    let stop = false;
+    let greetTimer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      const s = await api<BotStatus>(`/channels/meeting-bots/session/${encodeURIComponent(sessionId)}/status`, { token }).catch(() => null);
+      if (stop || !s) return;
+      setBot(s);
+      if (s.status === 'IN_CALL' && !greetTimer) greetTimer = setTimeout(() => startCall('admitted', { recallStatus: s.recallStatus }), ADMITTED_GREET_DELAY_MS);
+      if (s.status && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(s.status)) setPhase({ k: 'ended', state: null });
+    };
+    void tick();
+    const t = setInterval(() => void tick(), 3000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+      if (greetTimer) clearTimeout(greetTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.k, token, sessionId]);
+
+  // What the page hears, every 5 s while waiting and every 10 s in the call (capped server-side).
+  useEffect(() => {
+    if (!devices?.micStream || !devices.audioContext || !token || (phase.k !== 'waiting' && phase.k !== 'call')) return;
+    return levelReporter(devices.audioContext, devices.micStream, phase.k === 'waiting' ? 5000 : 10000, (peak, avg) => {
+      const ctx = devices.audioContext!;
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+      diag(sessionId, token, 'level', { phase: phase.k, peak, avg, audioContext: ctx.state });
+    });
+  }, [phase.k, devices, token, sessionId]);
 
   const persona = boot?.config.persona;
   return (
@@ -78,7 +133,13 @@ export function BotApp({ sessionId }: { sessionId: string }) {
       {phase.k === 'error' && <Status>{phase.message}</Status>}
       {boot && persona && phase.k === 'waiting' && (
         <Stage persona={persona} name={persona.name} role={persona.role} speaking={false}>
-          <Status>Say hello to start the practice session</Status>
+          <Status>
+            {bot?.status === 'JOINING' || bot?.status === 'SCHEDULED'
+              ? 'Waiting to be let into the meeting…'
+              : bot?.status === 'IN_CALL'
+                ? 'Joining the conversation…'
+                : 'Say hello to start the practice session'}
+          </Status>
         </Stage>
       )}
       {boot && token && devices && phase.k === 'call' && (
@@ -161,8 +222,40 @@ function release(d: CallDevices | null) {
   void d?.audioContext?.close().catch(() => undefined);
 }
 
+/** Report the peak and average RMS of the meeting audio every `everyMs`. Returns a cleanup. */
+function levelReporter(ctx: AudioContext, stream: MediaStream, everyMs: number, report: (peak: number, avg: number) => void): () => void {
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  src.connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  let peak = 0;
+  let sum = 0;
+  let n = 0;
+  const sample = setInterval(() => {
+    analyser.getFloatTimeDomainData(buf);
+    let s = 0;
+    for (const v of buf) s += v * v;
+    const rms = Math.sqrt(s / buf.length);
+    peak = Math.max(peak, rms);
+    sum += rms;
+    n += 1;
+  }, 100);
+  const flush = setInterval(() => {
+    report(peak, n ? sum / n : 0);
+    peak = 0;
+    sum = 0;
+    n = 0;
+  }, everyMs);
+  return () => {
+    clearInterval(sample);
+    clearInterval(flush);
+    src.disconnect();
+  };
+}
+
 /** Call `fire` once the stream's level stays above SPEECH_RMS for SPEECH_HOLD_MS. Returns a cleanup. */
-function onSpeech(ctx: AudioContext, stream: MediaStream, fire: () => void): () => void {
+function onSpeech(ctx: AudioContext, stream: MediaStream, fire: (rms: number) => void): () => void {
   const src = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
@@ -180,7 +273,7 @@ function onSpeech(ctx: AudioContext, stream: MediaStream, fire: () => void): () 
     else if (loudSince === null) loudSince = now;
     else if (!done && now - loudSince >= SPEECH_HOLD_MS) {
       done = true;
-      fire();
+      fire(Math.round(rms * 10000) / 10000);
     }
   }, 50);
   return () => {

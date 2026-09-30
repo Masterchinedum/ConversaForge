@@ -93,8 +93,8 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     );
 
   const base = `/w/${workspaceId}`;
-  // Scenario Studio (and the classic editor at the same URL) fills the viewport and manages its own padding.
-  const fullBleed = new RegExp(`^${base}/scenarios/[^/]+$`).test(pathname);
+  // Scenario Studio is a full-screen workspace with its own header (Home / Back), so the app chrome hides.
+  const fullBleed = new RegExp(`^${base}/scenarios/(?:new|[^/]+/studio)$`).test(pathname);
   const isActive = (item: NavItem) => {
     const full = item.href === '/' ? base : base + item.href;
     return item.exact ? pathname === full : pathname === full || pathname.startsWith(full + '/');
@@ -167,9 +167,18 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     </nav>
   );
 
+  if (fullBleed)
+    return (
+      <WorkspaceContext.Provider value={ctx}>
+        <main id="main" className="flex h-dvh flex-col overflow-hidden">
+          {children}
+        </main>
+      </WorkspaceContext.Provider>
+    );
+
   return (
     <WorkspaceContext.Provider value={ctx}>
-      <div className={fullBleed ? 'flex h-dvh flex-col overflow-hidden lg:flex-row' : 'min-h-screen lg:flex'}>
+      <div className="min-h-screen lg:flex">
         <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2">
           Skip to content
         </a>
@@ -190,9 +199,9 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
             <div className="h-[calc(100vh-3rem)]">{sidebar}</div>
           </div>
         </aside>
-        <main id="main" className={fullBleed ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto' : 'min-w-0 flex-1 px-4 py-6 lg:px-8'}>
+        <main id="main" className="min-w-0 flex-1 px-4 py-6 lg:px-8">
           {me.user.emailVerifiedAt === null && <VerifyEmailBanner email={me.user.email} />}
-          {fullBleed ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
+          {children}
         </main>
       </div>
     </WorkspaceContext.Provider>

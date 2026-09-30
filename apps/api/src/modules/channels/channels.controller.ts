@@ -13,7 +13,7 @@ import { QUEUES, QueueService } from '../../common/queue/queue.service';
 import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { BatchesService, CreateBatchBody, StartBatchBody, UploadTargetsBody } from './batches.service';
 import { ChannelProvidersService } from './channel-providers.service';
-import { CreateMeetingBotBody, MeetingsService, PracticeMeetingBody } from './meetings.service';
+import { BotPageEvent, CreateMeetingBotBody, MeetingsService, PracticeMeetingBody } from './meetings.service';
 import { CreatePhoneNumberBody, PhoneNumbersService, UpdatePhoneNumberBody } from './phone-numbers.service';
 import { OutboundCallBody, PhoneService, type OutboundCallInput, type TwilioParams } from './phone.service';
 
@@ -222,6 +222,30 @@ export class ChannelWebhooksController {
   private signature(req: FastifyRequest) {
     const s = req.headers['x-twilio-signature'];
     return Array.isArray(s) ? s[0] : s;
+  }
+
+  private bearer(req: FastifyRequest) {
+    const a = req.headers.authorization;
+    const t = typeof a === 'string' && a.startsWith('Bearer ') ? a.slice(7).trim() : '';
+    if (!t) throw Errors.unauthorized('Session token required');
+    return t;
+  }
+
+  /** Agent bot page: has the bot been admitted to the meeting yet? (session token) */
+  @Public()
+  @Get('meeting-bots/session/:sessionId/status')
+  async botStatus(@Param('sessionId') sessionId: string, @Req() req: FastifyRequest) {
+    await this.rateLimit.enforce(`botpage:status:${sessionId}`, 60, 60);
+    return this.meetings.botStatusForPage(sessionId, this.bearer(req));
+  }
+
+  /** Agent bot page diagnostics (audio levels, start trigger, errors). (session token) */
+  @Public()
+  @Post('meeting-bots/session/:sessionId/diagnostics')
+  @HttpCode(200)
+  async botDiagnostics(@Param('sessionId') sessionId: string, @Req() req: FastifyRequest, @Body(new ZodPipe(BotPageEvent)) body: z.infer<typeof BotPageEvent>) {
+    await this.rateLimit.enforce(`botpage:diag:${sessionId}`, 30, 60);
+    return this.meetings.logPageEvent(sessionId, this.bearer(req), body);
   }
 
   @Public()

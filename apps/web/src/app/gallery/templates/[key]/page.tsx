@@ -68,7 +68,7 @@ export default function TemplatePage() {
                 setErr(null);
                 try {
                   const d = await api<ScenarioDetail>(`/workspaces/${target}/scenarios`, { method: 'POST', body: { source: 'template', templateKey: key } });
-                  router.push(`/w/${target}/scenarios/${d.scenario.id}`);
+                  router.push(`/w/${target}/scenarios/${d.scenario.id}/studio`);
                 } catch (e) {
                   setErr(errorMessage(e));
                   setBusy(false);
