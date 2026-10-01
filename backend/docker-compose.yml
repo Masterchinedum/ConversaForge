@@ -1,4 +1,7 @@
-# Local infrastructure. `docker compose up -d` then follow README.md.
+# Local infrastructure for the backend. `docker compose up -d` (from backend/) then follow README.md.
+# The project name is pinned so the containers and data volumes keep their names (conversaforge-*)
+# no matter which folder this file lives in.
+name: conversaforge
 services:
   postgres:
     image: postgres:16-alpine
