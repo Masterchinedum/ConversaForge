@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { hash } from '@node-rs/argon2';
 import type { Prisma, ShareLink } from '@prisma/client';
-import { IDENTITY_MODES } from '@cf/shared';
+import { IDENTITY_MODES } from '../../shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

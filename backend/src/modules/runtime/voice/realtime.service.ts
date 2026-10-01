@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
 import { ActivityHandling, Behavior, EndSensitivity, Modality, type GoogleGenAI, type LiveConnectConfig } from '@google/genai';
-import type { RealtimeProviderId, ScenarioConfig } from '@cf/shared';
+import type { RealtimeProviderId, ScenarioConfig } from '../../../shared';
 import { env } from '../../../config/env';
 import { Errors } from '../../../common/http/errors';
 import { LlmService } from '../../../common/llm/llm.service';

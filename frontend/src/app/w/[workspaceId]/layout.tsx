@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import type { Capability } from '@cf/shared';
+import type { Capability } from '@/shared';
 import { VerifyEmailBanner } from '@/components/account/VerifyEmailBanner';
 import { Loading } from '@/components/ui';
 import { api } from '@/lib/api';

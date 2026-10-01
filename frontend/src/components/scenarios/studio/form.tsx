@@ -1,6 +1,6 @@
 'use client';
 import { useState, type ReactNode } from 'react';
-import { PRIVACY, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type RubricCriterion, type ValidationIssue } from '@cf/shared';
+import { PRIVACY, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type RubricCriterion, type ValidationIssue } from '@/shared';
 import { Badge, Button, Input, Modal, Select, Textarea, clsx } from '@/components/ui';
 import { fieldDomId, useEditor, useField } from '../editor-context';
 import { AudienceBadge, LockButton, NumberField, SelectField, TagsField, TextAreaField, ToggleField } from '../fields';

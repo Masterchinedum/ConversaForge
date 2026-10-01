@@ -5,7 +5,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { WsAdapter } from '@nestjs/platform-ws';
 import { Test } from '@nestjs/testing';
 import multipart from '@fastify/multipart';
-import type { ServerMessage } from '@cf/shared';
+import type { ServerMessage } from '../../shared';
 import WebSocket from 'ws';
 import { createServer, type Server } from 'node:http';
 import { CryptoService } from '../../common/crypto/crypto.service';

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Session } from '@prisma/client';
-import { substituteVariables, type ClientRuntimeConfig, type ScenarioConfig } from '@cf/shared';
+import { substituteVariables, type ClientRuntimeConfig, type ScenarioConfig } from '../../shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import type { ConsentRecord, ProviderInfo } from './runtime.types';

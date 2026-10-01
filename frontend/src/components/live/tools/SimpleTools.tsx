@@ -1,6 +1,6 @@
 'use client';
 import { Button, clsx, Textarea } from '@/components/ui';
-import type { PresentedTool } from '@cf/shared';
+import type { PresentedTool } from '@/shared';
 import { useEffect, useId, useRef, useState } from 'react';
 import { formatClock } from '../branding';
 

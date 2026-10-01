@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage } from '@cf/shared';
+import type { ClientMessage, ServerMessage } from '../../../shared';
 
 /**
  * Transport-agnostic bridge between a participant connection and a session engine.

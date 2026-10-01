@@ -3,7 +3,7 @@ import { Button, clsx, Modal, SimulatedBadge } from '@/components/ui';
 import type { LiveBootstrap } from '@/lib/live/runtime-api';
 import { transcriptRows } from '@/lib/live/store';
 import { modeLabel, useLiveCall, type CallDevices, type LifecycleEvent } from '@/lib/live/use-live-call';
-import { isTerminal, type SessionState } from '@cf/shared';
+import { isTerminal, type SessionState } from '@/shared';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { AgentAvatar } from './AgentAvatar';
 import { formatClock } from './branding';

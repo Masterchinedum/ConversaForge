@@ -1,4 +1,4 @@
-import { setPatternTester } from '@cf/shared';
+import { setPatternTester } from '../../shared';
 import * as vm from 'node:vm';
 
 /**
@@ -24,5 +24,5 @@ export function boundedRegexTest(re: RegExp, value: string, budgetMs = REGEX_BUD
   }
 }
 
-// Install for @cf/shared resolveVariables (runtime variable `pattern`). Importing this module is enough.
+// Install for src/shared resolveVariables (runtime variable `pattern`). Importing this module is enough.
 setPatternTester((re, value) => boundedRegexTest(re, value));

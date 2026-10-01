@@ -1,4 +1,4 @@
-import { defaultScenarioConfig, SCENARIO_TEMPLATES } from '@cf/shared';
+import { defaultScenarioConfig, SCENARIO_TEMPLATES } from '../../shared';
 import { exportScenarioConfig, importScenarioConfig, IMPORT_MAX_BYTES, parseConfigText, ScenarioImportError } from './scenario-io';
 import { isPathLocked, isSafeConfigPath } from './scenario-utils';
 

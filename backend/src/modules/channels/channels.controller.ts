@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Injectable, OnModuleIn
 import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { roleAtLeast } from '@cf/shared';
+import { roleAtLeast } from '../../shared';
 import { CurrentPrincipal, CurrentUser, CurrentWorkspace, Public, RequireCapability } from '../../common/auth/decorators';
 import { verifiedEmail, type Principal, type WorkspaceContext } from '../../common/auth/principal';
 import { Errors } from '../../common/http/errors';

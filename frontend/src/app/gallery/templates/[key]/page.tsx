@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { can } from '@cf/shared';
+import { can } from '@/shared';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useMe } from '@/lib/workspace';
 import { Alert, Badge, Button, ButtonLink, Card, EmptyState, ErrorState, Loading, Select } from '@/components/ui';

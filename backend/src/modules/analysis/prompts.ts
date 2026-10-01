@@ -1,4 +1,4 @@
-import type { ExtractionVariable, Rubric, ScenarioConfig } from '@cf/shared';
+import type { ExtractionVariable, Rubric, ScenarioConfig } from '../../shared';
 import type { TurnLike } from './evidence';
 
 /** Bump when the scoring/extraction prompts or schemas change (stored on every Evaluation). */

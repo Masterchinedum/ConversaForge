@@ -13,7 +13,7 @@ import {
   normalizeScenarioConfig,
   stableStringify,
   validateScenarioForPublish,
-} from '@cf/shared';
+} from '../src/shared';
 
 const prisma = new PrismaClient();
 const PASSWORD = process.env.SEED_PASSWORD ?? 'demo-password-123';

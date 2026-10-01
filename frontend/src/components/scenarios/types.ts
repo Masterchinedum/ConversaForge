@@ -1,4 +1,4 @@
-import type { FieldChange, ScenarioConfig, ValidationIssue } from '@cf/shared';
+import type { FieldChange, ScenarioConfig, ValidationIssue } from '@/shared';
 
 export interface ScenarioRow {
   id: string;

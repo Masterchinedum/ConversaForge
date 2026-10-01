@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import YAML from 'yaml';
-import { parseScenarioConfig, type FieldChange, type ScenarioConfig, type ValidationIssue } from '@cf/shared';
+import { parseScenarioConfig, type FieldChange, type ScenarioConfig, type ValidationIssue } from '@/shared';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, Loading, Modal, Select, SimulatedBadge, Textarea, clsx, useToast } from '@/components/ui';

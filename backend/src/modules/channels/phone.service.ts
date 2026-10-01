@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Session } from '@prisma/client';
-import { isTerminal, type ScenarioConfig, type SessionState } from '@cf/shared';
+import { isTerminal, type ScenarioConfig, type SessionState } from '../../shared';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import { env } from '../../config/env';

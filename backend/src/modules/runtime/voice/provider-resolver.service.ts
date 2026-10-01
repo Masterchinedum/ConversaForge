@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Channel, RealtimeProviderChoice, RealtimeProviderId, ScenarioConfig, SttProviderId, TtsProviderId } from '@cf/shared';
+import type { Channel, RealtimeProviderChoice, RealtimeProviderId, ScenarioConfig, SttProviderId, TtsProviderId } from '../../../shared';
 import { env } from '../../../config/env';
 import { LlmService } from '../../../common/llm/llm.service';
 import { LlmUnavailableError, type ResolvedLlm } from '../../../common/llm/llm.types';

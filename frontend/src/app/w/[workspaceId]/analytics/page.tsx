@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { CHANNELS } from '@cf/shared';
+import { CHANNELS } from '@/shared';
 import { BarList, LineChart } from '@/components/analytics/charts';
 import { RecentSessions } from '@/components/analytics/RecentSessions';
 import { formatHours, type AnalyticsSummary, type Breakdown } from '@/components/analytics/types';

@@ -13,7 +13,7 @@ import {
   validateScenarioForPublish,
   type ScenarioConfig,
   type ValidationIssue,
-} from '@cf/shared';
+} from '../../shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { userIdOf, type Principal } from '../../common/auth/principal';
 import { AppError, Errors } from '../../common/http/errors';

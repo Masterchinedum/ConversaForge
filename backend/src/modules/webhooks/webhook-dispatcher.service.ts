@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { WEBHOOK_EVENTS, type WebhookEventType } from '@cf/shared';
+import { WEBHOOK_EVENTS, type WebhookEventType } from '../../shared';
 import type { Job } from 'bullmq';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

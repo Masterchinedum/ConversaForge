@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { Prisma, type MeetingBot } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { isTerminal, type SessionState } from '@cf/shared';
+import { isTerminal, type SessionState } from '../../shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

@@ -4,7 +4,7 @@
  * session state and timer.
  */
 
-import type { PresentedTool, ServerMessage, SessionSnapshot, SessionState, TurnDTO } from '@cf/shared';
+import type { PresentedTool, ServerMessage, SessionSnapshot, SessionState, TurnDTO } from '@/shared';
 import type { ConnStatus } from './connection';
 
 export interface StreamingTurn {

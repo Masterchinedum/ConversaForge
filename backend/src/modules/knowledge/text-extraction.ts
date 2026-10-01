@@ -1,4 +1,4 @@
-import { UPLOAD_LIMITS } from '@cf/shared';
+import { UPLOAD_LIMITS } from '../../shared';
 
 /**
  * Untrusted document handling: content sniffing (never trust the client-declared mime type),

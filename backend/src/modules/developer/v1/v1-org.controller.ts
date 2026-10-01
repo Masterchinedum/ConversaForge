@@ -1,7 +1,7 @@
 import { Body, Get, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
-import { ROLES, USAGE_KINDS } from '@cf/shared';
+import { ROLES, USAGE_KINDS } from '../../../shared';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApiScopes, CurrentWorkspace } from '../../../common/auth/decorators';

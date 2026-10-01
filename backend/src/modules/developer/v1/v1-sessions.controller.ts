@@ -1,6 +1,6 @@
 import { Body, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
-import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES } from '@cf/shared';
+import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES } from '../../../shared';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { env } from '../../../config/env';

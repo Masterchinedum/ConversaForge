@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { API_KEY_SCOPES, WEBHOOK_EVENTS } from '@cf/shared';
+import { API_KEY_SCOPES, WEBHOOK_EVENTS } from '@/shared';
 
 export const metadata: Metadata = { title: 'API guide — ConversaForge' };
 

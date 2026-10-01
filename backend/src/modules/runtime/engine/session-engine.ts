@@ -12,7 +12,7 @@ import {
   type ServerMessage,
   type SessionState,
   type TurnDTO,
-} from '@cf/shared';
+} from '../../../shared';
 import { randomUUID } from 'node:crypto';
 import type { DomainEvents } from '../../../common/events/domain-events';
 import { Errors } from '../../../common/http/errors';

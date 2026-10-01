@@ -1,6 +1,6 @@
 import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { roleAtLeast } from '@cf/shared';
+import { roleAtLeast } from '../../shared';
 import { z } from 'zod';
 import { CurrentUser, CurrentWorkspace } from '../../common/auth/decorators';
 import { verifiedEmail, type Principal, type WorkspaceContext } from '../../common/auth/principal';

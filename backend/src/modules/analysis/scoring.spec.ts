@@ -1,4 +1,4 @@
-import { defaultScenarioConfig, validateExtractionValue } from '@cf/shared';
+import { defaultScenarioConfig, validateExtractionValue } from '../../shared';
 import { quoteAppearsIn, type TurnLike } from './evidence';
 import { processEvaluation } from './scoring';
 import { SIMULATED_SUMMARY_PREFIX, simulateExtraction, simulateScoring } from './simulator';

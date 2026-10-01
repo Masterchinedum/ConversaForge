@@ -5,7 +5,7 @@ import {
   resolveVariables,
   type Channel,
   type ScenarioConfig,
-} from '@cf/shared';
+} from '../../shared';
 // Installs the time-bounded tester for runtime variable patterns (ReDoS guard).
 import '../../common/security/regex-guard';
 import { env } from '../../config/env';

@@ -1,6 +1,6 @@
 'use client';
 import { clsx } from '@/components/ui';
-import type { ClientRuntimeConfig } from '@cf/shared';
+import type { ClientRuntimeConfig } from '@/shared';
 import { initials, parseColor } from './branding';
 
 export function AgentAvatar({

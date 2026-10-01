@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { OnGatewayConnection, WebSocketGateway } from '@nestjs/websockets';
-import { PROTOCOL_VERSION, WS_CLOSE_CODES, type ClientMessage, type ServerMessage } from '@cf/shared';
+import { PROTOCOL_VERSION, WS_CLOSE_CODES, type ClientMessage, type ServerMessage } from '../../shared';
 import type { IncomingMessage } from 'node:http';
 import type { RawData, WebSocket } from 'ws';
 import { AppError } from '../../common/http/errors';
@@ -23,7 +23,7 @@ function clientIp(req?: IncomingMessage): string {
 }
 
 /**
- * Participant live channel: `ws(s)://<api>/ws/session`, protocol in @cf/shared protocol.ts.
+ * Participant live channel: `ws(s)://<api>/ws/session`, protocol in src/shared protocol.ts.
  * The first message must be `hello` with the session token; afterwards messages are validated,
  * size- and rate-limited, and forwarded to the session engine through an EngineTransport.
  */

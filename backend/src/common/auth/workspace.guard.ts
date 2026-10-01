@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { can, type Capability } from '@cf/shared';
+import { can, type Capability } from '../../shared';
 import type { FastifyRequest } from 'fastify';
 import { Errors } from '../http/errors';
 import { PrismaService } from '../prisma/prisma.service';

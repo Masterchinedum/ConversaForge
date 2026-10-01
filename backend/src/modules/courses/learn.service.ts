@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Course, type CourseItem, type Enrollment, type Participant } from '@prisma/client';
-import { can, type Role } from '@cf/shared';
+import { can, type Role } from '../../shared';
 import { Errors } from '../../common/http/errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { SessionsService } from '../runtime/sessions.service';

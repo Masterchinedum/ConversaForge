@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Invitation, Prisma, Role } from '@prisma/client';
-import { ROLES } from '@cf/shared';
+import { ROLES } from '../../shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import useSWRInfinite from 'swr/infinite';
-import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES } from '@cf/shared';
+import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES } from '@/shared';
 import {
   Badge,
   Button,

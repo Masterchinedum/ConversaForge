@@ -1,7 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { SCENARIO_TEMPLATES, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type ScenarioType } from '@cf/shared';
+import { SCENARIO_TEMPLATES, SCENARIO_TYPE_LABELS, SCENARIO_TYPES, type ScenarioType } from '@/shared';
 import { api, errorMessage } from '@/lib/api';
 import { Alert, Button, Field, Input, Modal, Select, Tabs, Textarea, clsx } from '@/components/ui';
 import type { ScenarioDetail } from './types';

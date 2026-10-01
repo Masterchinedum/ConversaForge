@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { UPLOAD_LIMITS } from '@cf/shared';
+import { UPLOAD_LIMITS } from '@/shared';
 import { Alert, Button, Card, Checkbox, ErrorState, Field, Input, Loading, PageHeader, Textarea, useToast } from '@/components/ui';
 import { brandStyle } from '@/components/live/branding';
 import { api, errorMessage } from '@/lib/api';

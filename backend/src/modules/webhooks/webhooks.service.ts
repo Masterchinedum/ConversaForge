@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma, WebhookSubscription } from '@prisma/client';
-import { WEBHOOK_EVENTS } from '@cf/shared';
+import { WEBHOOK_EVENTS } from '../../shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

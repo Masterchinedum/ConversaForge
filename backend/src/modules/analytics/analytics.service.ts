@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { CHANNELS, can, type Role } from '@cf/shared';
+import { CHANNELS, can, type Role } from '../../shared';
 import { z } from 'zod';
 import { Errors } from '../../common/http/errors';
 import { PrismaService } from '../../common/prisma/prisma.service';

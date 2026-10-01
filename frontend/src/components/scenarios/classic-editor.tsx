@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import type { ValidationIssue } from '@cf/shared';
+import type { ValidationIssue } from '@/shared';
 import { ApiError, api, download, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';

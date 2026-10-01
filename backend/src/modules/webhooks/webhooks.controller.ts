@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { WEBHOOK_EVENTS } from '@cf/shared';
+import { WEBHOOK_EVENTS } from '../../shared';
 import type { z } from 'zod';
 import { CurrentPrincipal, RequireCapability } from '../../common/auth/decorators';
 import type { Principal } from '../../common/auth/principal';

@@ -4,7 +4,7 @@
  * bootstrap normalization, diagram layout and brand colors.
  */
 import { expect, test } from '@playwright/test';
-import type { ServerMessage, TurnDTO } from '@cf/shared';
+import type { ServerMessage, TurnDTO } from '@/shared';
 import { brandStyle, formatClock, parseColor } from '../src/components/live/branding';
 import { layoutDiagram } from '../src/components/live/tools/diagram-layout';
 import { backoffDelay } from '../src/lib/live/connection';

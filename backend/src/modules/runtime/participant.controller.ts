@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Prisma, type Session } from '@prisma/client';
-import { UPLOAD_LIMITS, isTerminal, substituteVariables, type SessionState } from '@cf/shared';
+import { UPLOAD_LIMITS, isTerminal, substituteVariables, type SessionState } from '../../shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';

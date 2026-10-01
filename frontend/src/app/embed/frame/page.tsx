@@ -14,7 +14,7 @@ import { LiveShell, StatusScreen } from '@/components/live/Shell';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { fetchBootstrap } from '@/lib/live/runtime-api';
 import { storeSessionToken } from '@/lib/live/token';
-import { isTerminal } from '@cf/shared';
+import { isTerminal } from '@/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type InitMsg = {

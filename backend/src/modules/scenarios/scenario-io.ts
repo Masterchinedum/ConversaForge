@@ -1,5 +1,5 @@
 import YAML from 'yaml';
-import { parseScenarioConfig, type ScenarioConfig } from '@cf/shared';
+import { parseScenarioConfig, type ScenarioConfig } from '../../shared';
 import { Errors } from '../../common/http/errors';
 import { zodIssuesToDetails } from './scenario-utils';
 

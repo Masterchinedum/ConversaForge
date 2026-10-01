@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Session } from '@prisma/client';
-import { UPLOAD_LIMITS, isTerminal, type ScenarioConfig, type SessionState } from '@cf/shared';
+import { UPLOAD_LIMITS, isTerminal, type ScenarioConfig, type SessionState } from '../../shared';
 import { createHash } from 'node:crypto';
 import { Errors } from '../../common/http/errors';
 import { PrismaService } from '../../common/prisma/prisma.service';

@@ -4,7 +4,7 @@
  * same-origin /api proxy.
  */
 
-import type { ClientRuntimeConfig, SessionState } from '@cf/shared';
+import type { ClientRuntimeConfig, SessionState } from '@/shared';
 import { api, ApiError } from '../api';
 
 export interface ConsentChoice {

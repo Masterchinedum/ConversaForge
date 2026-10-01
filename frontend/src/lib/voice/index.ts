@@ -2,7 +2,7 @@
  * Voice adapter selection: ClientRuntimeConfig (voiceMode / stt / tts) + browser capabilities.
  */
 
-import type { ClientRuntimeConfig, RealtimeProviderId } from '@cf/shared';
+import type { ClientRuntimeConfig, RealtimeProviderId } from '@/shared';
 import { BrowserSpeechAdapter, getSpeechRecognitionCtor } from './browser-speech';
 import { GeminiLiveAdapter } from './gemini-live';
 import { hasWebRtc, OpenAIRealtimeAdapter } from './openai-realtime';

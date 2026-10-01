@@ -1,5 +1,5 @@
 import { Global, Injectable, Logger, Module } from '@nestjs/common';
-import type { LlmProviderId } from '@cf/shared';
+import type { LlmProviderId } from '../../shared';
 import { env } from '../../config/env';
 import { CryptoService } from '../crypto/crypto.service';
 import { PrismaService } from '../prisma/prisma.service';

@@ -1,4 +1,4 @@
-import { defaultScenarioConfig, SCENARIO_TEMPLATES, validateScenarioForPublish, setAtPath, type ScenarioConfig } from '@cf/shared';
+import { defaultScenarioConfig, SCENARIO_TEMPLATES, validateScenarioForPublish, setAtPath, type ScenarioConfig } from '../../shared';
 import { detectMinutes, detectType, ruleBasedDraft } from './rule-drafter';
 
 const apply = (c: ScenarioConfig, changes: Array<{ path: string; value: unknown }>) =>

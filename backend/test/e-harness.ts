@@ -28,7 +28,7 @@ process.env.SIGNING_SECRET ??= randomBytes(32).toString('hex');
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import multipart from '@fastify/multipart';
-import { defaultScenarioConfig, type ScenarioConfigInput } from '@cf/shared';
+import { defaultScenarioConfig, type ScenarioConfigInput } from '../src/shared';
 import type { Role } from '@prisma/client';
 
 export type Injected = { statusCode: number; json: () => any; body: string; headers: Record<string, any> };

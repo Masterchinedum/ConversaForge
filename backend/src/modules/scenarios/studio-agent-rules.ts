@@ -1,4 +1,4 @@
-import { normalizeWeights, WEIGHT_EPSILON, type ScenarioConfig, type ValidationIssue } from '@cf/shared';
+import { normalizeWeights, WEIGHT_EPSILON, type ScenarioConfig, type ValidationIssue } from '../../shared';
 
 /**
  * LOCAL DEVELOPMENT SIMULATOR steps for the Studio agent (no AI provider configured). Deterministic and

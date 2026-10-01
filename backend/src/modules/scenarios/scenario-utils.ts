@@ -6,7 +6,7 @@ import {
   stableStringify,
   type EditableFieldPath,
   type ScenarioConfig,
-} from '@cf/shared';
+} from '../../shared';
 
 /** Top-level keys of ScenarioConfig; patch paths must start with one of these. */
 export const CONFIG_ROOT_KEYS = [

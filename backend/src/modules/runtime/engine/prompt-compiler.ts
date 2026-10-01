@@ -1,4 +1,4 @@
-import { substituteVariables, type AgendaItem, type ScenarioConfig } from '@cf/shared';
+import { substituteVariables, type AgendaItem, type ScenarioConfig } from '../../../shared';
 import type { RuntimeState } from '../runtime.types';
 
 /**

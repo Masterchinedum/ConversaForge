@@ -9,7 +9,7 @@ import {
   type ScenarioConfig,
   type ScenarioTemplate,
   type ScenarioType,
-} from '@cf/shared';
+} from '../../shared';
 import { Errors } from '../../common/http/errors';
 import { decodeCursor, encodeCursor } from '../../common/http/pagination';
 import { PrismaService } from '../../common/prisma/prisma.service';

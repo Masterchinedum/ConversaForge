@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext } from 'react';
 import useSWR from 'swr';
-import { can, type Capability, type Role } from '@cf/shared';
+import { can, type Capability, type Role } from '@/shared';
 
 export interface MeResponse {
   user: { id: string; email: string; name: string | null; isSuperAdmin: boolean; emailVerifiedAt?: string | null };

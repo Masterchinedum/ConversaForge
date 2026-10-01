@@ -1,4 +1,4 @@
-import { resolveVariables } from '@cf/shared';
+import { resolveVariables } from '../../shared';
 import { boundedRegexTest } from './regex-guard';
 
 describe('regex guard (ReDoS)', () => {

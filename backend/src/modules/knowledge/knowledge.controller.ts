@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { UPLOAD_LIMITS } from '@cf/shared';
+import { UPLOAD_LIMITS } from '../../shared';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CurrentPrincipal, RequireCapability } from '../../common/auth/decorators';

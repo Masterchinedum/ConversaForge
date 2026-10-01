@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { WebhookEventType } from '@cf/shared';
+import type { WebhookEventType } from '../../shared';
 
 /** Public webhook event types plus the synthetic `ping` used by "Send test". */
 export type DeliverableEventType = WebhookEventType | 'ping';

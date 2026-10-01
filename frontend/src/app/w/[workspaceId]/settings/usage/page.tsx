@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { USAGE_KINDS } from '@cf/shared';
+import { USAGE_KINDS } from '@/shared';
 import {
   Alert,
   Badge,

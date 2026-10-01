@@ -1,4 +1,4 @@
-import { ScenarioConfigSchema, defaultScenarioConfig, type ScenarioConfig } from '@cf/shared';
+import { ScenarioConfigSchema, defaultScenarioConfig, type ScenarioConfig } from '../../shared';
 
 export const PIPELINE_STEPS = ['finalize_transcript', 'score', 'extract', 'report', 'notify'] as const;
 export type PipelineStep = (typeof PIPELINE_STEPS)[number];

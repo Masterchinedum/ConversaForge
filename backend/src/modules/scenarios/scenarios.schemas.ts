@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EDITABLE_FIELD_PATHS, PRIVACY, SCENARIO_TYPES } from '@cf/shared';
+import { EDITABLE_FIELD_PATHS, PRIVACY, SCENARIO_TYPES } from '../../shared';
 import { PaginationQuery } from '../../common/http/pagination';
 import { IMPORT_MAX_BYTES } from './scenario-io';
 

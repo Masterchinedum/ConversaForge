@@ -6,7 +6,7 @@ import {
   type PresentedTool,
   type ScenarioConfig,
   type ToolDefinition,
-} from '@cf/shared';
+} from '../../../shared';
 import { randomUUID } from 'node:crypto';
 import type { LlmToolSpec } from '../../../common/llm/llm.types';
 import { PrismaService } from '../../../common/prisma/prisma.service';

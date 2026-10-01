@@ -20,7 +20,7 @@ import {
   type RuntimeVariable,
   type TimedInstruction,
   type ToolEnablement,
-} from '@cf/shared';
+} from '@/shared';
 import { ApiError } from '@/lib/api';
 import { Badge, Button, Card, Checkbox, Input, Select, Textarea, clsx } from '@/components/ui';
 import { fieldDomId, useEditor, useField } from './editor-context';

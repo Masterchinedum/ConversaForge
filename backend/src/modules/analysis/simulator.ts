@@ -3,7 +3,7 @@
  * Used only when no AI provider is configured. It is deterministic and uses only real transcript text:
  * every quote it cites is a verbatim excerpt of a participant turn. Results are always flagged simulated.
  */
-import type { ExtractionVariable, RubricCriterion } from '@cf/shared';
+import type { ExtractionVariable, RubricCriterion } from '../../shared';
 import type { SpeakerKind, TurnLike } from './evidence';
 
 export const SIMULATED_SUMMARY_PREFIX = 'Simulated analysis (no AI provider configured)';

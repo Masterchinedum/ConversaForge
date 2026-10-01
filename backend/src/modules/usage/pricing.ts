@@ -1,4 +1,4 @@
-import type { UsageKind } from '@cf/shared';
+import type { UsageKind } from '../../shared';
 
 /**
  * Estimated list prices in USD, used to attribute cost to sessions/workspaces.

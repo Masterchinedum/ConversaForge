@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Structural validation of inbound WebSocket messages (the TypeScript types live in @cf/shared protocol.ts).
+ * Structural validation of inbound WebSocket messages (the TypeScript types live in src/shared protocol.ts).
  * Hard caps here bound memory; the engine applies the documented (smaller) semantic limits with
  * friendly `too_large` errors.
  */

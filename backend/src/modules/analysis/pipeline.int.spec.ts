@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 
 process.env.DATABASE_URL = process.env.ANALYSIS_TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/conversaforge_test_d';
 
-import { defaultScenarioConfig, stableStringify, type ScenarioConfigInput } from '@cf/shared';
+import { defaultScenarioConfig, stableStringify, type ScenarioConfigInput } from '../../shared';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { CryptoService } from '../../common/crypto/crypto.service';

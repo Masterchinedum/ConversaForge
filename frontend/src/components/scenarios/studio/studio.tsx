@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
-import { fieldLabel, getAtPath, SCENARIO_TEMPLATES, stableStringify, type ValidationIssue } from '@cf/shared';
+import { fieldLabel, getAtPath, SCENARIO_TEMPLATES, stableStringify, type ValidationIssue } from '@/shared';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 import { Alert, Button, EmptyState, ErrorState, Loading, Spinner, clsx, useToast } from '@/components/ui';

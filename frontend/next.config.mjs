@@ -56,7 +56,6 @@ const nextConfig = {
   // Separate build dirs let several dev servers run side by side (NEXT_DIST_DIR=.next-foo).
   distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
-  transpilePackages: ['@cf/shared'],
   poweredByHeader: false,
   experimental: {
     // The /api/* rewrite proxy buffers request bodies and truncates them at 10 MB by default, which
@@ -70,8 +69,8 @@ const nextConfig = {
   // No server-side image optimization (avoids the native sharp/libvips dependency).
   images: { unoptimized: true },
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
-  // Trace workspace packages from the monorepo root for standalone builds.
-  outputFileTracingRoot: path.join(here, '../../'),
+  // Pin tracing to this project so Next doesn't pick up a lockfile in a parent directory.
+  outputFileTracingRoot: here,
   async rewrites() {
     // Same-origin proxy so the httpOnly session cookie works without CORS.
     return [

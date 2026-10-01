@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useCallback, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { UPLOAD_LIMITS } from '@cf/shared';
+import { UPLOAD_LIMITS } from '@/shared';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';

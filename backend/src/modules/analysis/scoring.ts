@@ -2,9 +2,9 @@
  * Turns a model's (or the simulator's) raw rubric judgment into a trustworthy evaluation:
  * validates shape, verifies every evidence quote against the transcript, downgrades unsupported scores
  * to "insufficient evidence", redacts protected-trait mentions and computes the weighted overall score
- * IN CODE with @cf/shared computeWeightedScore (the model never does arithmetic).
+ * IN CODE with src/shared computeWeightedScore (the model never does arithmetic).
  */
-import { clampScore, computeWeightedScore, type Rubric, type WeightedResult } from '@cf/shared';
+import { clampScore, computeWeightedScore, type Rubric, type WeightedResult } from '../../shared';
 import { z } from 'zod';
 import { redactProtected, verifyEvidence, type EvidenceItem, type SpeakerKind, type TurnLike } from './evidence';
 

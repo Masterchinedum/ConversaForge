@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
-import { defaultScenarioConfig, setAtPath, validateScenarioForPublish, type ScenarioConfig, type ValidationIssue } from '@cf/shared';
+import { defaultScenarioConfig, setAtPath, validateScenarioForPublish, type ScenarioConfig, type ValidationIssue } from '@/shared';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 import type { EditorCtx } from './editor-context';

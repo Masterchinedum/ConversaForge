@@ -1,5 +1,5 @@
 import type { Scenario, ScenarioVersion } from '@prisma/client';
-import { ScenarioConfigSchema, resolveVariables, substituteVariables, type IdentityMode, type ScenarioConfig } from '@cf/shared';
+import { ScenarioConfigSchema, resolveVariables, substituteVariables, type IdentityMode, type ScenarioConfig } from '../../shared';
 // Installs the time-bounded tester for runtime variable patterns (ReDoS guard).
 import '../../common/security/regex-guard';
 import { z } from 'zod';

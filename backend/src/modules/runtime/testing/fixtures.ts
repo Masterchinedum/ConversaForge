@@ -6,7 +6,7 @@ import {
   stableStringify,
   type ScenarioConfig,
   type ScenarioConfigInput,
-} from '@cf/shared';
+} from '../../../shared';
 import { createHash, randomBytes } from 'node:crypto';
 
 export function testDbAvailable(): boolean {

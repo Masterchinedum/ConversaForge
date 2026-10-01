@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { ButtonLink } from '@/components/ui';
-import type { SessionState } from '@cf/shared';
+import type { SessionState } from '@/shared';
 import { formatClock } from './branding';
 import { StatusScreen } from './Shell';
 

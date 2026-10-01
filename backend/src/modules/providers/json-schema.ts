@@ -9,7 +9,7 @@
  * `$ref`/`$defs`/`if`/`then`/`not`/`patternProperties`/dependent* are rejected at save time so a
  * schema never silently validates less than it appears to.
  */
-import { regexPatternRisk } from '@cf/shared';
+import { regexPatternRisk } from '../../shared';
 import { boundedRegexTest } from '../../common/security/regex-guard';
 
 export const MAX_SCHEMA_BYTES = 16 * 1024;

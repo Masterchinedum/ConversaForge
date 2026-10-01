@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { ROLES, type Role } from '@cf/shared';
+import { ROLES, type Role } from '@/shared';
 import {
   Alert,
   Badge,

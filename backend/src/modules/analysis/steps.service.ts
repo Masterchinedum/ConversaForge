@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { stableStringify, validateExtractionValue, type ScenarioConfig } from '@cf/shared';
+import { stableStringify, validateExtractionValue, type ScenarioConfig } from '../../shared';
 import { env } from '../../config/env';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { LlmService } from '../../common/llm/llm.service';

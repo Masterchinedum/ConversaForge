@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { EDITABLE_FIELD_PATHS, FIELD_AUDIENCE, type EditableFieldPath } from '@cf/shared';
+import { EDITABLE_FIELD_PATHS, FIELD_AUDIENCE, type EditableFieldPath } from '@/shared';
 import { Button, Checkbox, Input, Select, Textarea, clsx } from '@/components/ui';
 import { fieldDomId, issuesFor, useEditor, useField } from './editor-context';
 

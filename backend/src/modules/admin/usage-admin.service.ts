@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { USAGE_KINDS } from '@cf/shared';
+import { USAGE_KINDS } from '../../shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit/audit.service';

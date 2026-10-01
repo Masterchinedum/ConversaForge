@@ -1,6 +1,6 @@
 'use client';
 import { createContext, useContext } from 'react';
-import { EDITABLE_FIELD_PATHS, getAtPath, type ScenarioConfig, type ValidationIssue } from '@cf/shared';
+import { EDITABLE_FIELD_PATHS, getAtPath, type ScenarioConfig, type ValidationIssue } from '@/shared';
 
 export interface EditorCtx {
   config: ScenarioConfig;

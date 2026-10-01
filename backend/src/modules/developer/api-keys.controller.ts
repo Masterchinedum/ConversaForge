@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { API_KEY_SCOPES } from '@cf/shared';
+import { API_KEY_SCOPES } from '../../shared';
 import type { z } from 'zod';
 import { CurrentPrincipal, RequireCapability } from '../../common/auth/decorators';
 import type { Principal } from '../../common/auth/principal';

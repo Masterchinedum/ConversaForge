@@ -1,7 +1,7 @@
 import { Body, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
-import { SCENARIO_TYPES } from '@cf/shared';
+import { SCENARIO_TYPES } from '../../../shared';
 import { z } from 'zod';
 import { ApiScopes, CurrentWorkspace } from '../../../common/auth/decorators';
 import type { WorkspaceContext } from '../../../common/auth/principal';

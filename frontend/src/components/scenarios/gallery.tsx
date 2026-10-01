@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, type ReactNode } from 'react';
-import { SCENARIO_TYPE_LABELS, SCENARIO_TYPES } from '@cf/shared';
+import { SCENARIO_TYPE_LABELS, SCENARIO_TYPES } from '@/shared';
 import { Badge, Input, Select } from '@/components/ui';
 import type { GalleryCardData } from './types';
 

@@ -2,7 +2,7 @@
 import { Alert, Button } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { uploadFile } from '@/lib/live/runtime-api';
-import { UPLOAD_LIMITS } from '@cf/shared';
+import { UPLOAD_LIMITS } from '@/shared';
 import { useId, useRef, useState } from 'react';
 import type { ToolProps } from './SimpleTools';
 

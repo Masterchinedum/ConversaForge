@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { WEBHOOK_EVENTS, type WebhookEventType } from '@cf/shared';
+import { WEBHOOK_EVENTS, type WebhookEventType } from '@/shared';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, CopyButton, EmptyState, ErrorState, Field, Input, Loading, Modal, Select, Table, Td, Th, useToast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';

@@ -1,4 +1,4 @@
-import type { Role } from '@cf/shared';
+import type { Role } from '../../shared';
 
 export type Principal =
   | {

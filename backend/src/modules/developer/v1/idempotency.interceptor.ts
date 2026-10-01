@@ -1,7 +1,7 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Prisma } from '@prisma/client';
-import { stableStringify } from '@cf/shared';
+import { stableStringify } from '../../../shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { from, lastValueFrom, Observable } from 'rxjs';
 import { CryptoService } from '../../../common/crypto/crypto.service';

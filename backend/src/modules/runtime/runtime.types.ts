@@ -1,4 +1,4 @@
-import type { LlmProviderId, RealtimeProviderChoice, RealtimeProviderId, SttProviderId, TtsProviderId, VoiceMode } from '@cf/shared';
+import type { LlmProviderId, RealtimeProviderChoice, RealtimeProviderId, SttProviderId, TtsProviderId, VoiceMode } from '../../shared';
 
 /** Stored in Session.consent. */
 export interface ConsentRecord {

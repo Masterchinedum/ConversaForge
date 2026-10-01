@@ -1,6 +1,6 @@
 'use client';
 import { Button } from '@/components/ui';
-import { getToolDefinition, type PresentedTool } from '@cf/shared';
+import { getToolDefinition, type PresentedTool } from '@/shared';
 import type { ComponentType } from 'react';
 import { DocumentUploadTool } from './DocumentUploadTool';
 import { CardTool, MultipleChoiceTool, NotepadTool, TimerTool, type ToolProps } from './SimpleTools';

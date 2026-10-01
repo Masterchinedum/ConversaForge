@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage } from '@cf/shared';
+import type { ClientMessage, ServerMessage } from '../../../shared';
 import { decodeMulaw, EnergyVad, encodeMulaw, frames, pcmBytesToSamples, pcmToWav, resample } from '../audio/audio';
 
 /**

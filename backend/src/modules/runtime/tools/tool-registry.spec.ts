@@ -1,4 +1,4 @@
-import { InvalidTransitionError, assertTransition, canTransition, SESSION_STATES, TERMINAL_STATES } from '@cf/shared';
+import { InvalidTransitionError, assertTransition, canTransition, SESSION_STATES, TERMINAL_STATES } from '../../../shared';
 import { validateJsonSchema } from './json-schema';
 import { ToolRegistry, type ToolContext } from './tool-registry';
 import { initialRuntimeState } from '../runtime.types';

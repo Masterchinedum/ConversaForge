@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { defaultScenarioConfig, type ScenarioConfig } from '@cf/shared';
+import { defaultScenarioConfig, type ScenarioConfig } from '../../../shared';
 import { ProviderResolverService, liveModel, pickLiveProvider } from './provider-resolver.service';
 import { GEMINI_THINKING_PAD_MS, GEMINI_TOKEN, RealtimeService, geminiVoice } from './realtime.service';
 

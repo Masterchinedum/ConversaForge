@@ -1,7 +1,11 @@
 {
-  "name": "@cf/api",
-  "version": "0.1.0",
+  "name": "conversaforge-backend",
   "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput > /dev/null 2>&1 &) && node --enable-source-maps --watch dist/main.js",
@@ -16,13 +20,13 @@
     "seed": "tsx prisma/seed.ts",
     "db:sync": "bash scripts-db-sync.sh",
     "compile": "tsc -p tsconfig.build.json",
-    "test:prepare": "bash -c 'createdb -h localhost -U postgres conversaforge_test 2>/dev/null; DB=postgresql://postgres:postgres@localhost:5432/conversaforge_test; DATABASE_URL=$DB npx prisma db push --skip-generate --accept-data-loss && psql $DB -q -f prisma/sql/post-push.sql'"
+    "test:prepare": "bash -c 'createdb -h localhost -U postgres conversaforge_test 2>/dev/null; DB=postgresql://postgres:postgres@localhost:5432/conversaforge_test; DATABASE_URL=$DB npx prisma db push --skip-generate --accept-data-loss && psql $DB -q -f prisma/sql/post-push.sql'",
+    "check-shared-drift": "bash scripts/check-shared-drift.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.128.0",
     "@aws-sdk/client-s3": "3.1141.0",
     "@aws-sdk/s3-request-presigner": "3.1141.0",
-    "@cf/shared": "workspace:*",
     "@fastify/cookie": "11.1.2",
     "@fastify/helmet": "13.1.1",
     "@fastify/multipart": "9.4.0",
@@ -90,5 +94,20 @@
     "moduleNameMapper": {
       "^(\\.{1,2}/.*)\\.js$": "$1"
     }
+  },
+  "pnpm": {
+    "overrides": {
+      "fastify": "^5.12.1",
+      "deepmerge-ts": "^8.0.0"
+    },
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "@node-rs/argon2",
+      "esbuild",
+      "@nestjs/core",
+      "msgpackr-extract"
+    ]
   }
 }

@@ -2,7 +2,7 @@ import { Controller, Get, Param, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { can } from '@cf/shared';
+import { can } from '../../shared';
 import { CurrentWorkspace, Public } from '../../common/auth/decorators';
 import type { WorkspaceContext } from '../../common/auth/principal';
 import { ZodPipe } from '../../common/http/zod.pipe';

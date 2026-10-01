@@ -4,7 +4,7 @@
  * participant turns (unacknowledged finals are resent with the same clientTurnId; the server dedupes).
  */
 
-import { PROTOCOL_VERSION, WS_CLOSE_CODES, type ClientMessage, type ServerMessage } from '@cf/shared';
+import { PROTOCOL_VERSION, WS_CLOSE_CODES, type ClientMessage, type ServerMessage } from '@/shared';
 import { Emitter } from '../voice/types';
 
 export type ConnStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'offline' | 'closed';

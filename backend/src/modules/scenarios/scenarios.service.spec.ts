@@ -6,7 +6,7 @@
  */
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/conversaforge_test_a';
 
-import { defaultScenarioConfig, SCENARIO_TEMPLATES, type ScenarioConfig } from '@cf/shared';
+import { defaultScenarioConfig, SCENARIO_TEMPLATES, type ScenarioConfig } from '../../shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { SimulatorProvider } from '../../common/llm/simulator.provider';
 import type { Principal } from '../../common/auth/principal';

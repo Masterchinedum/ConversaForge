@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, type Channel, type ProcessingStatus, type SessionState } from '@prisma/client';
-import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES, roleAtLeast, type Role } from '@cf/shared';
+import { CHANNELS, PROCESSING_STATUSES, SESSION_STATES, roleAtLeast, type Role } from '../../shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit/audit.service';
 import type { Principal } from '../../common/auth/principal';

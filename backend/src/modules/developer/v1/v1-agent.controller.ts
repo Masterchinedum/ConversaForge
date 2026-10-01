@@ -1,6 +1,6 @@
 import { Body, Get, HttpCode, Post, Req } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
-import type { ApiKeyScope } from '@cf/shared';
+import type { ApiKeyScope } from '../../../shared';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApiScopes, CurrentWorkspace } from '../../../common/auth/decorators';

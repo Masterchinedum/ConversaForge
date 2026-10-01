@@ -5,7 +5,7 @@ import {
   substituteVariables,
   type ScenarioConfig,
   type ScenarioType,
-} from '@cf/shared';
+} from '../../shared';
 // Installs the time-bounded tester for runtime variable patterns (ReDoS guard).
 import '../../common/security/regex-guard';
 // Prompt compiler owned by workstream B (runtime). Imported as plain functions (no module coupling).

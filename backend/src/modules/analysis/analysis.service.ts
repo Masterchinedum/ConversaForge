@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, type ProcessingStatus } from '@prisma/client';
-import { ANALYZABLE_TERMINAL_STATES, TERMINAL_STATES, type SessionState } from '@cf/shared';
+import { ANALYZABLE_TERMINAL_STATES, TERMINAL_STATES, type SessionState } from '../../shared';
 import type { Job } from 'bullmq';
 import { DomainEvents } from '../../common/events/domain-events';
 import { Errors } from '../../common/http/errors';

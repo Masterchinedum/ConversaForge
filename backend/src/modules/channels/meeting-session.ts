@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { assertTransition, type SessionState } from '@cf/shared';
+import { assertTransition, type SessionState } from '../../shared';
 import type { DomainEvents } from '../../common/events/domain-events';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 

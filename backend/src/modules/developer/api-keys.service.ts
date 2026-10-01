@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { API_KEY_SCOPES } from '@cf/shared';
+import { API_KEY_SCOPES } from '../../shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit/audit.service';
 import { API_KEY_PREFIX } from '../../common/auth/auth.guard';

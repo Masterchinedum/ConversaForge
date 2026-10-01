@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext, SetMetadata } from '@nestjs/common';
-import type { ApiKeyScope, Capability } from '@cf/shared';
+import type { ApiKeyScope, Capability } from '../../shared';
 import type { FastifyRequest } from 'fastify';
 import type { Principal, WorkspaceContext } from './principal';
 import { Errors } from '../http/errors';

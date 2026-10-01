@@ -9,7 +9,7 @@ import {
   type ScenarioConfig,
   type ScenarioType,
   type ToolEnablement,
-} from '@cf/shared';
+} from '../../shared';
 import { isPathLocked } from './scenario-utils';
 
 /**

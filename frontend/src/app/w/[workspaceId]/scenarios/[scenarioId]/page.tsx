@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import useSWR from 'swr';
-import type { ScenarioConfig } from '@cf/shared';
+import type { ScenarioConfig } from '@/shared';
 import { ApiError, api, download, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { useWorkspace } from '@/lib/workspace';

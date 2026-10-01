@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fieldLabel } from '@cf/shared';
+import { fieldLabel } from '@/shared';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 import { Alert, Badge, Button, Checkbox, SimulatedBadge, Spinner, clsx, useToast } from '@/components/ui';

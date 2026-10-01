@@ -1,4 +1,4 @@
-import type { LlmProviderId } from '@cf/shared';
+import type { LlmProviderId } from '../../shared';
 
 export type LlmPurpose = 'live' | 'analysis' | 'assistant' | 'memory';
 

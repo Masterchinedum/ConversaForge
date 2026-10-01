@@ -4,7 +4,7 @@
  * recorder together for the call screen.
  */
 
-import { isTerminal, type ClientMessage, type ClientRuntimeConfig, type ServerMessage, type SessionState } from '@cf/shared';
+import { isTerminal, type ClientMessage, type ClientRuntimeConfig, type ServerMessage, type SessionState } from '@/shared';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { wsUrl } from '../api';
 import {

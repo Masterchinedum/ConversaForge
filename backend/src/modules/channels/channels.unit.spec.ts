@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { ClientMessage } from '@cf/shared';
+import type { ClientMessage } from '../../shared';
 import { decodeMulaw, EnergyVad, encodeMulaw, linearToMulaw, mulawToLinear, pcmToWav, resample } from './audio/audio';
 import { parseTwilioCredential } from './channel-providers.service';
 import { CsvError, parseCsv, parseTargetsCsv } from './csv';

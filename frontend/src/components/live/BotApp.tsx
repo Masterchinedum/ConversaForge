@@ -12,7 +12,7 @@ import { transcriptRows } from '@/lib/live/store';
 import { readSessionToken } from '@/lib/live/token';
 import { useLiveCall, type CallDevices } from '@/lib/live/use-live-call';
 import { api, errorMessage } from '@/lib/api';
-import { isTerminal, LIVE_STATES, type SessionState } from '@cf/shared';
+import { isTerminal, LIVE_STATES, type SessionState } from '@/shared';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentAvatar } from './AgentAvatar';
 import { brandStyle } from './branding';

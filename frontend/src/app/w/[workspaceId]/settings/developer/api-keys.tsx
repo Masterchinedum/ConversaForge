@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import { API_KEY_SCOPES, type ApiKeyScope } from '@cf/shared';
+import { API_KEY_SCOPES, type ApiKeyScope } from '@/shared';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmButton, CopyButton, EmptyState, ErrorState, Field, Input, Loading, Modal, Table, Td, Th, useToast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/format';

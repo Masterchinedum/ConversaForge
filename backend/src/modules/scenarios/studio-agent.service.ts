@@ -9,7 +9,7 @@ import {
   stableStringify,
   type EditableFieldPath,
   type ScenarioConfig,
-} from '@cf/shared';
+} from '../../shared';
 import { userIdOf, type Principal } from '../../common/auth/principal';
 import { AppError, Errors } from '../../common/http/errors';
 import { LlmService } from '../../common/llm/llm.service';

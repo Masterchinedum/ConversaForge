@@ -6,7 +6,7 @@ import { fetchBootstrap, type ConsentChoice, type LiveBootstrap } from '@/lib/li
 import { readSessionToken } from '@/lib/live/token';
 import type { CallDevices, LifecycleEvent } from '@/lib/live/use-live-call';
 import { detectCapabilities, planVoice } from '@/lib/voice';
-import { isTerminal, LIVE_STATES, type SessionState } from '@cf/shared';
+import { isTerminal, LIVE_STATES, type SessionState } from '@/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CallScreen, type CallEnded } from './CallScreen';
 import { ConsentScreen } from './ConsentScreen';
