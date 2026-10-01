@@ -9,12 +9,13 @@ Requirements: a Linux host with Docker, a DNS record `APP_DOMAIN` pointing at it
 ```bash
 git clone <repo> conversaforge && cd conversaforge
 # Build images (or pull from your registry in CI)
-docker build -f infra/docker/api.Dockerfile -t conversaforge/api:1.0.0 .
-docker build -f infra/docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_WS_URL=wss://app.example.com \
-  --build-arg API_INTERNAL_URL=http://api:4000 -t conversaforge/web:1.0.0 .   # both are baked in at build time
+# Each image builds from its own project folder; neither needs the other's source.
+docker build -t conversaforge/api:1.0.0 backend
+docker build --build-arg NEXT_PUBLIC_API_WS_URL=wss://app.example.com \
+  --build-arg API_INTERNAL_URL=http://api:4000 -t conversaforge/web:1.0.0 frontend   # both are baked in at build time
 
 cd infra
-cp ../.env.example .env.production     # then edit — see "Required settings" below
+cp ../backend/.env.example .env.production     # then edit (add NEXT_PUBLIC_API_WS_URL from frontend/.env.example) — see "Required settings" below
 export APP_DOMAIN=app.example.com POSTGRES_PASSWORD=<strong> VERSION=1.0.0
 docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate   # prisma migrate deploy
 docker compose -f docker-compose.prod.yml up -d
@@ -49,8 +50,8 @@ Caddy (`infra/Caddyfile`) terminates TLS automatically, routes `/api/*`, `/healt
 Any container platform works (Fly.io, Render, ECS, Kubernetes): run the same `api` image twice (`api` and `worker` commands), the `web` image, managed Postgres 16 (e.g. RDS, Neon, Supabase) and managed Redis/Valkey (ElastiCache/Upstash; BullMQ needs `maxmemory-policy noeviction`). Run `migrate` as a release/pre-deploy job.
 
 ## 3. Database migrations
-- Migrations live in `apps/api/prisma/migrations` and are applied with `prisma migrate deploy` (the `migrate` command of the API image). The initial migration also installs the ScenarioVersion immutability trigger and the knowledge full-text-search column (`prisma/sql/post-push.sql`).
-- Develop schema changes with `pnpm --filter @cf/api prisma:dev --name <change>`; review the SQL; ship backward-compatible migrations (expand → deploy → contract) so the previous release keeps working during a rollout.
+- Migrations live in `backend/prisma/migrations` and are applied with `prisma migrate deploy` (the `migrate` command of the API image). The initial migration also installs the ScenarioVersion immutability trigger and the knowledge full-text-search column (`prisma/sql/post-push.sql`).
+- Develop schema changes with `pnpm prisma:dev --name <change>` in `backend/`; review the SQL; ship backward-compatible migrations (expand → deploy → contract) so the previous release keeps working during a rollout.
 
 ## 4. Monitoring
 - **Health**: `GET /health` returns `{ status, db, redis, latencyMs, version }` (HTTP 200 always; alert when `status != "ok"`). Point an uptime monitor at it every minute.

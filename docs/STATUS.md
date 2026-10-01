@@ -15,15 +15,15 @@ This document separates what is **complete and verified**, what is **implemented
 
 | Gate | Result |
 |---|---|
-| Shared package tests (`pnpm --filter @cf/shared test`) | ✅ 71/71 |
-| API tests, all suites, one run (`cd apps/api && pnpm test:prepare && npx jest --forceExit`) | ✅ 373/373 (28 suites) |
+| Shared package tests (`(cd backend && pnpm test src/shared)`) | ✅ 71/71 |
+| API tests, all suites, one run (`cd backend && pnpm test:prepare && npx jest --forceExit`) | ✅ 373/373 (28 suites) |
 | Type checks (`pnpm -r typecheck`) | ✅ clean |
-| Web production build (`pnpm --filter @cf/web build`) | ✅ 47 routes |
-| Browser journeys (Playwright, `apps/web/e2e/*.spec.ts`) | ✅ 14/14 journey tests passed against a **production build** (`next build` + `next start`, CSP on) with a freshly migrated + seeded DB: 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md). Workstream I re-ran `journeys.spec.ts` 14/14 (dev server, fresh DB) plus the new `gemini-live.spec.ts` (fake Gemini Live server driving the real SDK) and the voice/realtime specs |
+| Web production build (`(cd frontend && pnpm build)`) | ✅ 47 routes |
+| Browser journeys (Playwright, `frontend/e2e/*.spec.ts`) | ✅ 14/14 journey tests passed against a **production build** (`next build` + `next start`, CSP on) with a freshly migrated + seeded DB: 8 cross-role journeys (`journeys.spec.ts`, creator → participant → reviewer → admin → learner → knowledge → developer → every page × every role) plus each workstream's specs, against the real API. See [`QA_REPORT.md`](QA_REPORT.md). Workstream I re-ran `journeys.spec.ts` 14/14 (dev server, fresh DB) plus the new `gemini-live.spec.ts` (fake Gemini Live server driving the real SDK) and the voice/realtime specs |
 | Security review | ✅ 2 high / 5 medium / 6 low findings fixed. See [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) |
 | Dependency audit (`pnpm audit --prod`) | ✅ no known vulnerabilities |
 | Migrations from empty DB (`prisma migrate deploy`) + no drift vs schema | ✅ |
-| Docker images (`infra/docker/*.Dockerfile`) | ✅ Both build. API container migrated an empty DB, booted healthy, and served signup/login through the web container |
+| Docker images (`backend/Dockerfile`, `frontend/Dockerfile`) | ✅ Both build. API container migrated an empty DB, booted healthy, and served signup/login through the web container |
 
 ## Feature status
 
@@ -86,7 +86,7 @@ This document separates what is **complete and verified**, what is **implemented
 | Courses: ordered scenario/video/document/link items, forced order, visibility, share link, Play All, Continue / Start over, **0% for new enrollments** | ✅ | |
 | Coach mode with learner-scoped memory; inspect/disable/clear | ✅ simulator · 🔑 real model for fact extraction | Memory only for verified identities |
 | Analytics (counts, durations, score trends, rubric dimensions, learners, teams, scenarios, channels), CSV, role limits | ✅ | Day buckets in UTC |
-| Usage ledger (tokens/minutes/chars/storage/telephony with estimated cost), quotas with hard limits, alerts | ✅ | Price table in `apps/api/src/modules/usage/pricing.ts` — review against current vendor pricing |
+| Usage ledger (tokens/minutes/chars/storage/telephony with estimated cost), quotas with hard limits, alerts | ✅ | Price table in `backend/src/modules/usage/pricing.ts` — review against current vendor pricing |
 | Billing adapter | 🧩 | `none` adapter active; Stripe adapter is a stub (needs `stripe` package, `STRIPE_SECRET_KEY`, webhook) |
 | Privacy: consent records, retention job (deletes media, redacts transcripts, keeps scores), participant data export/delete | ✅ | |
 
@@ -100,14 +100,14 @@ This document separates what is **complete and verified**, what is **implemented
 | Meeting bots (Recall.ai) with manual URL scheduling: **AI agent** (the persona joins Zoom / Meet / Teams and talks — Recall output media opens `/bot/:sessionId`, which runs the normal live session with the meeting as mic and speaker; members start it from the scenario page → "Practice in a meeting") or **notetaker** (transcribe a real meeting) | 🔑 `RECALL_API_KEY` + matching `RECALL_REGION` + public HTTPS `API_PUBLIC_URL` (and `WEB_PUBLIC_URL` for agents) | Unit + integration tests with faked Recall HTTP; no real meeting joined yet. Calendar auto-matching not built 🧩 |
 
 ## First real run checklist
-1. Put `GEMINI_API_KEY=…` (Gemini Live + Gemini text) **or** `OPENAI_API_KEY=…` (OpenAI Realtime + text) in `apps/api/.env` (or add it in Settings → AI providers). New scenarios use live speech-to-speech automatically; existing seeded scenarios that say "Pipeline" can be switched in the editor (Model → Voice mode). For the pipeline with Claude, set `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5`).
+1. Put `GEMINI_API_KEY=…` (Gemini Live + Gemini text) **or** `OPENAI_API_KEY=…` (OpenAI Realtime + text) in `backend/.env` (or add it in Settings → AI providers). New scenarios use live speech-to-speech automatically; existing seeded scenarios that say "Pipeline" can be switched in the editor (Model → Voice mode). For the pipeline with Claude, set `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5`).
 2. Set a spend guard: Settings → Usage & quotas → `cost_micros` monthly hard limit (e.g. 5,000,000 = $5).
 3. Open a published scenario in **Chrome or Edge** → Try it → allow the microphone → talk. The call header shows "Voice: Google Gemini Live" / "OpenAI Realtime" (or the fallback in use).
 4. Afterward, check Sessions → the session → Report (scores should no longer say "Simulated").
 5. Record the result in this file and flip the 🔑 rows you verified to ✅.
 
 ## Deployment
-See [`DEPLOYMENT.md`](DEPLOYMENT.md): Docker images (`infra/docker/*.Dockerfile`), single-host compose with Caddy TLS (`infra/docker-compose.prod.yml`), migrations, monitoring (`/health`, logs, queues), backups/restore drill and rollback. Production deployment itself (a server, a domain, DNS) was not performed. It requires your hosting account.
+See [`DEPLOYMENT.md`](DEPLOYMENT.md): Docker images (`backend/Dockerfile`, `frontend/Dockerfile`), single-host compose with Caddy TLS (`infra/docker-compose.prod.yml`), migrations, monitoring (`/health`, logs, queues), backups/restore drill and rollback. Production deployment itself (a server, a domain, DNS) was not performed. It requires your hosting account.
 
 ## Upgrade/deploy notes
 - **Email verification**: accounts are unverified until the user clicks the emailed link (needs `SMTP_URL`; without it the link is only logged in development). Don't bulk-backfill `emailVerifiedAt` — verification is what prevents someone from claiming another person's email-based access.

@@ -1,0 +1,33 @@
+name: Frontend
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: frontend/package.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      # src/shared is a copy of backend/src/shared; flag drift (skips when the backend isn't in this repo).
+      - run: pnpm check-shared-drift
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg NEXT_PUBLIC_API_WS_URL=wss://example.com -t conversaforge-web:ci .

@@ -1,5 +1,5 @@
 # Single-host production deployment (Docker Compose). See docs/DEPLOYMENT.md.
-# Required: a .env.production file next to this compose file (template: /.env.example) and DNS for APP_DOMAIN.
+# Required: a .env.production file next to this compose file (template: backend/.env.example; the web service only needs API_INTERNAL_URL) and DNS for APP_DOMAIN.
 name: conversaforge
 services:
   caddy:

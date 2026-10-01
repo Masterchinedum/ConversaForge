@@ -12,7 +12,7 @@ import { join } from 'node:path';
  * Then the same Studio at phone width.
  *
  * Runs against the local simulator (no AI provider key), so the agent is deterministic and fast.
- * Screenshots of each step: apps/web/node_modules/.cache/cf-e2e/studio-journey/ (or E2E_SHOTS_DIR).
+ * Screenshots of each step: frontend/node_modules/.cache/cf-e2e/studio-journey/ (or E2E_SHOTS_DIR).
  * Run: E2E_WEB_URL=http://localhost:3101 E2E_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/scenario-studio.spec.ts
  */
 test.setTimeout(240_000);

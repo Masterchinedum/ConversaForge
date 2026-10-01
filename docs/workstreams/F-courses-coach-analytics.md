@@ -1,8 +1,8 @@
 # Workstream F — Courses, coach mode & analytics
 
-Owner areas: `apps/api/src/modules/{courses,coach,analytics}`, web routes `/w/[id]` (dashboard),
+Owner areas: `backend/src/modules/{courses,coach,analytics}`, web routes `/w/[id]` (dashboard),
 `/w/[id]/courses/**`, `/w/[id]/learn/**`, `/w/[id]/coach`, `/w/[id]/analytics`, `/c/[token]`,
-components `apps/web/src/components/{learning,analytics}`, `apps/web/src/lib/learning.ts`.
+components `frontend/src/components/{learning,analytics}`, `frontend/src/lib/learning.ts`.
 
 ## What was built
 

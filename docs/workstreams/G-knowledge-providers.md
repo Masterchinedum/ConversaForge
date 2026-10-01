@@ -2,7 +2,7 @@
 
 ## What was built
 
-### Knowledge base (`apps/api/src/modules/knowledge`)
+### Knowledge base (`backend/src/modules/knowledge`)
 All routes are under `/api/workspaces/:workspaceId/knowledge` and require `knowledge.manage` (CREATOR+).
 
 | Method | Path | Purpose |
@@ -64,7 +64,7 @@ The only difference from `ARCHITECTURE.md` is that results also carry `snippet` 
 
 **Semantic search.** `embeddings.ts` defines the `EmbeddingProvider` interface, a no-op default (bound in `KnowledgeModule`), and the documented plan for adding pgvector (column in `post-push.sql`, embedding in the worker, reciprocal-rank fusion in `search`). Nothing is embedded today.
 
-### Provider connections (`apps/api/src/modules/providers`)
+### Provider connections (`backend/src/modules/providers`)
 All routes are under `/api/workspaces/:workspaceId/providers` and require `providers.manage` (ADMIN+).
 - `GET /` (add `?includeRevoked=true` to include revoked), `GET /catalog`, `GET /status`, `GET /:id`
 - `POST /` `{ provider, secret, label?, config?, verify = true }`
@@ -157,15 +157,15 @@ All routes are under `/api/workspaces/:workspaceId/functions`. Mutations, test a
   - Cross-origin POST → 403.
   - A 1.9M-character document ingested into 671 chunks; searching it takes about 25 ms. Documents over 2M characters → FAILED ("more than 2,000,000 characters").
 - **Real provider verification with fake keys.** Anthropic → 401 → INVALID ("API key is invalid."). In this sandbox the other providers are blocked by the egress proxy with a plain-text 403, which is how the proxy-vs-provider 403 distinction was found and fixed.
-- **Playwright** (`apps/web/e2e/knowledge-providers.spec.ts`, against :3107/:4107) → **2/2 passed**:
+- **Playwright** (`frontend/e2e/knowledge-providers.spec.ts`, against :3107/:4107) → **2/2 passed**:
   - Knowledge journey: upload a PDF, rejection of a disguised binary, Ready, paste Markdown, search with highlights, citation and model context, detail page with chunks, delete modal.
   - Providers and functions journey: simulator status, add an Anthropic key (verified, masked, never in page HTML), schema validation, the test runner rejecting bad args, masked header on edit.
   - Run with `WEB_URL=http://localhost:3107 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright test e2e/knowledge-providers.spec.ts`.
 
 ## Fixes to shared files (minimal, additive)
-- `apps/web/next.config.mjs`: `experimental.middlewareClientMaxBodySize: '210mb'`. The `/api/*` rewrite proxy was truncating request bodies at 10 MB (the proxy failed with EPIPE / "socket hang up"), which broke knowledge uploads between 10 and 25 MB and course assets. The API still enforces the real limits.
-- `apps/api/src/common/llm/llm.service.ts`: Twilio secret normalization in `providerSecret`, described above.
-- `apps/web/src/app/w/[workspaceId]/layout.tsx`: the "Custom functions" nav item.
+- `frontend/next.config.mjs`: `experimental.middlewareClientMaxBodySize: '210mb'`. The `/api/*` rewrite proxy was truncating request bodies at 10 MB (the proxy failed with EPIPE / "socket hang up"), which broke knowledge uploads between 10 and 25 MB and course assets. The API still enforces the real limits.
+- `backend/src/common/llm/llm.service.ts`: Twilio secret normalization in `providerSecret`, described above.
+- `frontend/src/app/w/[workspaceId]/layout.tsx`: the "Custom functions" nav item.
 - Someone else added `maxParamLength: 2048` in `main.ts` during this work. Before that, signed media URLs returned 414.
 
 ## Not done / externally blocked

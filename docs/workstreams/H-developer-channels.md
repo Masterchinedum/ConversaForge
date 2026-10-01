@@ -1,6 +1,6 @@
 # Workstream H — Developer platform, webhooks & channels
 
-Owner areas: `apps/api/src/modules/developer`, `modules/webhooks`, `modules/channels`;
+Owner areas: `backend/src/modules/developer`, `modules/webhooks`, `modules/channels`;
 web `/w/[id]/settings/developer`, `/w/[id]/channels`, `/docs/api`; docs `docs/api.md` (full integration guide).
 
 ## What was built

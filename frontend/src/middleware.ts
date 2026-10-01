@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { safeReturnUrl } from '@/lib/live/token';
 
 const API = process.env.API_INTERNAL_URL || 'http://localhost:4000';
-/** Mirrors SESSION_COOKIE in apps/api/src/common/auth/auth.guard.ts. */
+/** Mirrors SESSION_COOKIE in backend/src/common/auth/auth.guard.ts. */
 const SESSION_COOKIE = 'cf_session';
 
 /**

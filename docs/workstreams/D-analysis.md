@@ -1,6 +1,6 @@
 # Workstream D — Post-session pipeline, reports & review
 
-Owner areas: `apps/api/src/modules/analysis/**`, web routes `/w/[workspaceId]/sessions/**` and `/report/[sessionId]`, and the shared review components in `apps/web/src/components/review/**`.
+Owner areas: `backend/src/modules/analysis/**`, web routes `/w/[workspaceId]/sessions/**` and `/report/[sessionId]`, and the shared review components in `frontend/src/components/review/**`.
 
 ## What was built
 
@@ -47,7 +47,7 @@ finalize_transcript → score → extract → report → notify → complete (st
   - The cited turn's speaker must match the evaluated subject. `subjectSpeaker()` maps the rubric's evaluatedSubject text to PARTICIPANT by default, AGENT, or "either".
   - A score with no surviving evidence becomes `insufficientEvidence` with a null score.
   - Sentences in model text that mention protected traits are removed (`redactProtected`) as a safety net.
-  - The overall score is computed only by `computeWeightedScore` from `@cf/shared`, using the rubric's weights, `minEvidenceCoverage` and `passingScore`.
+  - The overall score is computed only by `computeWeightedScore` from `src/shared`, using the rubric's weights, `minEvidenceCoverage` and `passingScore`.
 - **Stored with each `Evaluation`:** `scenarioVersionId`, `rubricHash` (sha256 of the stable-stringified rubric), provider, model, `promptVersion` (`score-v1`) and `simulated`.
 - `humanReviewRequired` is set when the version sets `analysis.requireHumanReview` or the scenario type is `interview`.
 
@@ -148,7 +148,7 @@ All routes are under `/api/workspaces/:workspaceId/sessions` and filtered by wor
    - `Session.analysisGeneration Int @default(0)`
    - `ProcessingJob.generation Int @default(1)`
    - `Evaluation.generation Int @default(1)`, plus `@@unique([sessionId, generation])`
-3. **New capability** in `@cf/shared` `CAPABILITIES`: `'sessions.delete': 'ADMIN'`.
+3. **New capability** in `src/shared` `CAPABILITIES`: `'sessions.delete': 'ADMIN'`.
 4. **Events.** `session.analyzed` fires on COMPLETED and PARTIAL, including when no rubric is configured (`evaluationId: null`). It may fire again after a reprocess or retry, so listeners must stay idempotent. `session.failed` with `errorCode:'analysis_failed'` means the *analysis* failed, not the conversation.
 5. **Exported services.**
    - `AnalysisService`: `reprocess`, `retryStep`, `startPipeline`, `sweep`.
@@ -156,7 +156,7 @@ All routes are under `/api/workspaces/:workspaceId/sessions` and filtered by wor
    - `ExportService`.
    - `ParticipantReportService`: `forSession`, `forUser`, `listForUser`.
 6. **B:** the participant report depends on `resumeTokenHash` and `resumeExpiresAt` staying set after a session ends. Anonymous report access therefore follows the token's 24 h TTL. Logged-in participants can use `/api/me/...` without that limit.
-7. **Foundation fix.** `apps/api/scripts-db-sync.sh` now drops the generated `KnowledgeChunk.tsv` column before `prisma db push`, because Prisma cannot alter a generated column; `post-push.sql` recreates it. Without this, every `db:sync` after the first one failed.
+7. **Foundation fix.** `backend/scripts-db-sync.sh` now drops the generated `KnowledgeChunk.tsv` column before `prisma db push`, because Prisma cannot alter a generated column; `post-push.sql` recreates it. Without this, every `db:sync` after the first one failed.
 
 ## How it was tested
 - **Unit tests** (`evidence.spec.ts`, `scoring.spec.ts`):

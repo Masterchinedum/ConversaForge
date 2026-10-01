@@ -7,9 +7,10 @@ dist
 *.log
 coverage
 /storage
-apps/api/storage
-apps/web/test-results
-apps/web/playwright-report
+backend/storage
+frontend/test-results
+frontend/playwright-report
+test-results
 .turbo
 *.tsbuildinfo
 .DS_Store

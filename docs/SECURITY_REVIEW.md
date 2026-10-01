@@ -6,9 +6,9 @@ Date: 2026-09-25 · Reviewer: independent AppSec review (code review plus live e
 
 | Area | Covered |
 |---|---|
-| API (`apps/api`, NestJS 11 / Fastify 5) | Every controller and guard, tenant scoping of Prisma and raw SQL, the token types (`cf_session`, `cf_live_`, `cfs_`, `cfe_`, `cfp_`, share-link, course, invitation, reset), uploads and media serving, SSRF guards, webhooks and provider callbacks, WebSocket gateways, LLM prompt construction, CSV/PDF exports, rate limits, the privacy and retention jobs |
-| Web (`apps/web`, Next.js 15) | XSS sinks, URL handling, redirects, `embed.js` and the `/embed/frame` postMessage protocol, security headers, where tokens are stored |
-| Shared (`packages/shared`) | Scenario schema validation, variable resolution and sanitizing |
+| API (`backend`, NestJS 11 / Fastify 5) | Every controller and guard, tenant scoping of Prisma and raw SQL, the token types (`cf_session`, `cf_live_`, `cfs_`, `cfe_`, `cfp_`, share-link, course, invitation, reset), uploads and media serving, SSRF guards, webhooks and provider callbacks, WebSocket gateways, LLM prompt construction, CSV/PDF exports, rate limits, the privacy and retention jobs |
+| Web (`frontend`, Next.js 15) | XSS sinks, URL handling, redirects, `embed.js` and the `/embed/frame` postMessage protocol, security headers, where tokens are stored |
+| Shared (`src/shared`, copied in backend + frontend) | Scenario schema validation, variable resolution and sanitizing |
 | Dependencies | `pnpm audit --prod` |
 
 Out of scope: infrastructure (TLS termination, WAF, bucket policies, secret storage) and the third-party providers themselves.
@@ -46,15 +46,15 @@ Severity reflects the impact in this multi-tenant SaaS: H = cross-user data or a
 ### H-2 ReDoS: author regexes run against participant input on the shared event loop
 
 - **Where:**
-  - `packages/shared/src/variables.ts`: runtime variable `pattern`, input up to 2,000 characters from public share-link or embed callers.
+  - `src/shared/variables.ts`: runtime variable `pattern`, input up to 2,000 characters from public share-link or embed callers.
   - `modules/runtime/tools/json-schema.ts`: custom-function argument `pattern`, where the input comes from the model or, in realtime mode, straight from the client.
   - `modules/providers/json-schema.ts`.
   - Validation only rejected a narrow `(x+)+` shape (functions) or nothing at all (variables).
 - **Impact:** One tenant, or one public participant against a tenant with a bad pattern, can freeze the API process for every tenant. For example, `(a+)+` with 60 × `a!` never finishes.
 - **Fix:**
-  - Added `packages/shared/src/safe-regex.ts` with `regexPatternRisk()`. It rejects nested or alternated quantified groups, backreferences and more than four unbounded quantifiers. Scenario validation (now compiled with the same `u` flag as the runtime) and function-schema validation both use it.
-  - At runtime every evaluation goes through `common/security/regex-guard.ts`: `vm` with a 50 ms timeout, which V8 honours inside the regex engine. It is installed into `@cf/shared` through `setPatternTester`. A timeout counts as "no match", so it fails closed.
-- **Tests:** `packages/shared/src/safe-regex.test.ts` (19 cases) and `apps/api/src/common/security/regex-guard.spec.ts` (an evil pattern is interrupted in about 50 ms, and a stored evil variable pattern fails closed quickly).
+  - Added `src/shared/safe-regex.ts` with `regexPatternRisk()`. It rejects nested or alternated quantified groups, backreferences and more than four unbounded quantifiers. Scenario validation (now compiled with the same `u` flag as the runtime) and function-schema validation both use it.
+  - At runtime every evaluation goes through `common/security/regex-guard.ts`: `vm` with a 50 ms timeout, which V8 honours inside the regex engine. It is installed into `src/shared` through `setPatternTester`. A timeout counts as "no match", so it fails closed.
+- **Tests:** `backend/src/shared/safe-regex.spec.ts` (19 cases) and `backend/src/common/security/regex-guard.spec.ts` (an evil pattern is interrupted in about 50 ms, and a stored evil variable pattern fails closed quickly).
 
 ### M-1 Coach memory crossed between people who typed the same email
 
@@ -89,7 +89,7 @@ Severity reflects the impact in this multi-tenant SaaS: H = cross-user data or a
 
 ### M-5 Open redirect after login and signup
 
-- **Where:** `apps/web/src/app/(auth)/login/page.tsx` and `signup/page.tsx`. The check `next.startsWith('/') && !startsWith('//')` let `/\evil.com` through, which browsers treat as `//evil.com`.
+- **Where:** `frontend/src/app/(auth)/login/page.tsx` and `signup/page.tsx`. The check `next.startsWith('/') && !startsWith('//')` let `/\evil.com` through, which browsers treat as `//evil.com`.
 - **Fix:** Both pages use the existing `safeReturnUrl()` (same-origin check, rejects backslashes and control characters). Web `tsc` is clean.
 
 ### L-1 WebSocket hello rate limit was keyed on a spoofable `X-Forwarded-For`

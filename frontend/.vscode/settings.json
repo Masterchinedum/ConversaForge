@@ -1,0 +1,5 @@
+{
+  // Use this project's TypeScript (the version tsc runs with) so editor diagnostics match `pnpm typecheck`.
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}

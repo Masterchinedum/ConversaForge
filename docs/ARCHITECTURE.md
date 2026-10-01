@@ -13,67 +13,73 @@ Read it fully before changing code.
 | Jobs | BullMQ on Redis/Valkey (worker can run in-process or as `node dist/worker.js`) |
 | Storage | Local disk (dev) or a Cloudflare R2 bucket; tenant-prefixed keys, signed URLs |
 | AI | Provider adapters: Anthropic (Claude), OpenAI (LLM, Realtime voice, TTS/STT), Google Gemini (`@google/genai`: LLM, Gemini Live voice), local **simulator**. Live conversations default to a speech-to-speech model (Gemini Live, then OpenAI as backup) with automatic fallback to the STT → LLM → TTS pipeline |
-| Shared | `packages/shared` (`@cf/shared`): scenario schema, validation, scoring math, variables, state machine, WS protocol, tool catalog |
+| Shared | `src/shared` in **both** projects (an identical copy each, no package): scenario schema, validation, scoring math, variables, state machine, WS protocol, tool catalog. Change both copies; `pnpm check-shared-drift` diffs them |
 
 Do NOT add GPL/AGPL/SSPL/BUSL dependencies. Check the license of anything new (`npm view <pkg> license`).
 
 ## Repository layout
 
 ```
-apps/api            NestJS API + worker
+backend/            NestJS API + worker (standalone project)
   prisma/schema.prisma      full domain model (single file)
   prisma/sql/post-push.sql  raw SQL objects (immutability trigger, FTS column)
   src/config/env.ts         validated env
+  src/shared/               API ↔ web contract (copy of frontend/src/shared; tests live here)
   src/common/*              infrastructure: prisma, redis, auth guards, errors, zod pipe, pagination,
                             crypto, audit, storage, queue, rate limit, mail, llm, domain events
   src/modules/<feature>/    one Nest module per feature (see ownership below)
-apps/web            Next.js app
+frontend/           Next.js app (standalone project)
   src/lib/api.ts            fetch helper (`api()`, `fetcher`, `download()`, `wsUrl()`)
   src/lib/workspace.tsx     `useWorkspace()` → { workspaceId, role, can(), wsPath(), href() }
   src/components/ui         UI kit (Button, Input, Field, Card, Table, Tabs, Modal, Badge, SimulatedBadge, toasts…)
   src/app/w/[workspaceId]/  authenticated workspace area (sidebar layout)
-packages/shared     @cf/shared (build with `pnpm --filter @cf/shared build` after changing it)
+  src/shared/               API ↔ web contract (copy of backend/src/shared; import as `@/shared`)
+infra/              production compose + Caddy for the two images, backup/restore scripts
 docs/               architecture, API, deployment, status
 ```
 
 ## Local development
 
 ```
+cd backend
 service postgresql start; service redis-server start      # or: docker compose up -d
-cp .env.example apps/api/.env   # fill ENCRYPTION_KEY / SIGNING_SECRET
+cp .env.example .env            # fill ENCRYPTION_KEY / SIGNING_SECRET
 pnpm install
-pnpm --filter @cf/shared build
-cd apps/api && pnpm db:sync     # prisma db push + raw SQL objects + generate
-pnpm --filter @cf/api dev       # API on :4000 (tsc watch + node --watch; decorators need tsc, not tsx)
-pnpm --filter @cf/web dev       # Web on :3000, proxies /api/* to the API
+pnpm db:sync                    # prisma db push + raw SQL objects + generate
+pnpm dev                        # API on :4000 (tsc watch + node --watch; decorators need tsc, not tsx)
+
+cd frontend
+cp .env.example .env.local
+pnpm install
+pnpm dev                        # Web on :3000, proxies /api/* to the API
 ```
 
 The API must be compiled with `tsc` (Nest needs `emitDecoratorMetadata`; tsx/esbuild does not emit it).
-Run a one-off API: `cd apps/api && npx tsc -p tsconfig.build.json && PORT=4100 node dist/main.js`.
-Run a web dev server on another port without clobbering others: `NEXT_DIST_DIR=.next-myname WEB_PORT=3100 API_INTERNAL_URL=http://localhost:4100 pnpm --filter @cf/web dev`.
+Run a one-off API: `cd backend && npx tsc -p tsconfig.build.json && PORT=4100 node dist/main.js`.
+Run a web dev server on another port without clobbering others: `NEXT_DIST_DIR=.next-myname WEB_PORT=3100 API_INTERNAL_URL=http://localhost:4100 pnpm dev` (in `frontend/`).
 
 ### TypeScript module settings
-`apps/api` and `packages/shared` compile to CommonJS with `"module": "nodenext"` / `"moduleResolution": "nodenext"`
+`backend` (including its `src/shared`) compiles to CommonJS with `"module": "nodenext"` / `"moduleResolution": "nodenext"`
 (no `baseUrl`; the `node10` resolver and `baseUrl` are deprecated in TypeScript 6 and removed in 7). Under
 `nodenext` a dynamic `import()` in a CommonJS file is an ES-module import: write relative specifiers with the
 `.js` extension (`await import('./app.module.js')`) and expect a real `import()` at runtime (which is also what
 makes ESM-only packages such as `unpdf` loadable). Jest cannot run `import()` in its CommonJS VM, so ts-jest
 transpiles tests with `module: commonjs` (the call becomes `require`) and `moduleNameMapper` maps the `.js`
-suffix back to the `.ts` source (see the `jest` block in `apps/api/package.json`). The web app uses
-`moduleResolution: bundler` (Next.js). `.vscode/settings.json` pins the editor to the workspace TypeScript so
+suffix back to the `.ts` source (see the `jest` block in `backend/package.json`). The web app uses
+`moduleResolution: bundler` (Next.js) and compiles its own copy of `src/shared` from source. `.vscode/settings.json` pins the editor to the project TypeScript so
 diagnostics match `pnpm typecheck`.
 
 ### Schema changes
-- `apps/api/prisma/schema.prisma` is the single schema. Production uses migrations in `apps/api/prisma/migrations` (`prisma migrate deploy`).
-- The initial migration was generated with `apps/api/scripts/create-initial-migration.sh` (schema + `prisma/sql/post-push.sql`). After launch, never regenerate it: create new migrations with `cd apps/api && pnpm prisma:dev --name <change>`, review the SQL, and keep them backward compatible (expand → deploy → contract).
+- `backend/prisma/schema.prisma` is the single schema. Production uses migrations in `backend/prisma/migrations` (`prisma migrate deploy`).
+- The initial migration was generated with `backend/scripts/create-initial-migration.sh` (schema + `prisma/sql/post-push.sql`). After launch, never regenerate it: create new migrations with `cd backend && pnpm prisma:dev --name <change>`, review the SQL, and keep them backward compatible (expand → deploy → contract).
 - `KnowledgeChunk.tsv` is a Postgres GENERATED column (`@default(dbgenerated())` tells Prisma not to manage it); never write it from code.
-- Quick local iteration without migrations: `cd apps/api && pnpm db:sync` (db push + raw SQL objects).
+- Quick local iteration without migrations: `cd backend && pnpm db:sync` (db push + raw SQL objects).
 
 ## API conventions
 
 - Global prefix `/api`. Workspace resources live under `/api/workspaces/:workspaceId/...`.
 - **Auth**: global `AuthGuard` resolves the principal from cookie `cf_session`, or `Authorization: Bearer cf_live_…` (API key). Mark unauthenticated routes with `@Public()`.
-- **Workspace authorization**: global `WorkspaceGuard` runs for every route with a `:workspaceId` param. It requires membership and the capability from `@RequireCapability('<cap>')` (default: `scenarios.run` = any member). Capabilities and role ranks are in `@cf/shared` `CAPABILITIES`. API keys are rejected unless the route has `@ApiScopes(...)`.
+- **Workspace authorization**: global `WorkspaceGuard` runs for every route with a `:workspaceId` param. It requires membership and the capability from `@RequireCapability('<cap>')` (default: `scenarios.run` = any member). Capabilities and role ranks are in `src/shared` `CAPABILITIES`. API keys are rejected unless the route has `@ApiScopes(...)`.
 - **Every query must filter by `workspaceId`** (use `findFirst({ where: { id, workspaceId } })`, never `findUnique({ where: { id } })` alone for tenant data). A resource from another workspace is a 404.
 - Validate bodies/queries with `@Body(new ZodPipe(Schema))` / `@Query(new ZodPipe(Schema))`.
 - Errors: throw `Errors.notFound('Scenario')`, `Errors.forbidden()`, `Errors.validation(msg, details)`, etc. (`common/http/errors.ts`). Envelope: `{ error: { code, message, details?, requestId } }`.
@@ -118,7 +124,7 @@ diagnostics match `pnpm typecheck`.
 | G | Knowledge base (upload, async processing, FTS search with citations), provider connections (BYO keys), custom functions | `modules/knowledge`, `modules/providers` | `/w/:id/knowledge`, `/w/:id/settings/providers`, `/w/:id/settings/functions` |
 | H | Developer platform: API keys, REST `/api/v1`, OpenAPI, idempotency, webhooks (signed, retried), channels (phone via Twilio, meeting bots via Recall.ai — AI agent via output media `/bot/:sessionId`, or notetaker — batch/scheduled calls) | `modules/developer`, `modules/webhooks`, `modules/channels` | `/w/:id/settings/developer`, `/w/:id/channels/**`, `/docs/api` |
 
-Shared files owned by the lead (coordinate before editing): `app.module.ts`, `main.ts`, `common/**`, `schema.prisma` (additive edits allowed), `packages/shared/**` (additive edits allowed; rebuild after), `apps/web/src/components/ui`, `apps/web/src/app/w/[workspaceId]/layout.tsx`.
+Shared files owned by the lead (coordinate before editing): `app.module.ts`, `main.ts`, `common/**`, `schema.prisma` (additive edits allowed), `src/shared/** (both copies)` (additive edits allowed; rebuild after), `frontend/src/components/ui`, `frontend/src/app/w/[workspaceId]/layout.tsx`.
 
 ## Cross-workstream contracts
 
@@ -144,7 +150,7 @@ Participant session REST (B), authenticated with `Authorization: Bearer cfs_…`
 - `POST /api/runtime/sessions/:id/uploads` (document_upload tool; multipart)
 - `POST /api/runtime/sessions/:id/tts` `{ text }` → audio (server TTS, if configured)
 - `POST /api/runtime/sessions/:id/stt` (audio chunk → text, if configured)
-- WebSocket `ws(s)://<api>/ws/session` speaking the protocol in `@cf/shared/protocol.ts`
+- WebSocket `ws(s)://<api>/ws/session` speaking the protocol in `src/shared/protocol.ts`
 - Member self-run (cookie auth): `POST /api/workspaces/:workspaceId/scenarios/:scenarioId/sessions`
 
 Client token storage (C/E/F): after creating a session, store the token in `sessionStorage['cf:session:<id>']` **and** `localStorage['cf:session:<id>']` (for refresh/resume), then navigate to `/live/<id>`.
@@ -171,6 +177,6 @@ Listens to `session.started|terminal|analyzed|extracted|failed`, writes `OutboxE
 
 ## Testing
 
-- Shared: `pnpm --filter @cf/shared test` (vitest).
+- Shared: `(cd backend && pnpm test src/shared)` (vitest).
 - API: jest (`*.spec.ts` next to the code). Integration specs may use a real Postgres database `conversaforge_test_<ws>` (create with `createdb`, run `DATABASE_URL=... pnpm db:sync`).
-- Web: `tsc --noEmit`; browser journeys via Playwright (`apps/web/e2e`), Chromium at `/opt/pw-browsers`.
+- Web: `tsc --noEmit`; browser journeys via Playwright (`frontend/e2e`), Chromium at `/opt/pw-browsers`.

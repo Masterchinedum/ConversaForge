@@ -1,6 +1,6 @@
 /**
  * Development/demo seed. Idempotent: re-running updates nothing that already exists.
- *   cd apps/api && pnpm seed
+ *   cd backend && pnpm seed
  * Creates a demo organization with one user per role, publishes every built-in template as a
  * scenario (version 1), a demo course, and a share link. Refuses to run in production unless
  * SEED_ALLOW_PRODUCTION=true.

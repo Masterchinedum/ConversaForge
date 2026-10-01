@@ -7,9 +7,9 @@ This workstream covers two areas:
 
 Code lives in:
 
-- `apps/api/src/modules/access/**`
-- `apps/api/src/modules/admin/**`
-- `apps/web/src/components/access/**`
+- `backend/src/modules/access/**`
+- `backend/src/modules/admin/**`
+- `frontend/src/components/access/**`
 - these web routes: `/r/[token]`, `/r/t/[token]`, `/p/[scenarioId]`, `/invite/[token]`, `/account`, `/w/[id]/scenarios/[scenarioId]/access`, and `/w/[id]/settings/{page,members,branding,usage,audit,privacy}`
 
 ## API
@@ -140,7 +140,7 @@ I used a **separate queue instead of `QUEUES.maintenance`**. BullMQ gives each j
 
 ## Tests (actual results)
 
-- **API integration.** Jest runs the real `AppModule` on Fastify via `app.inject`, against Postgres `conversaforge_test_e` and Redis db 5. The harness is `apps/api/test/e-harness.ts`.
+- **API integration.** Jest runs the real `AppModule` on Fastify via `app.inject`, against Postgres `conversaforge_test_e` and Redis db 5. The harness is `backend/test/e-harness.ts`.
   - `src/modules/access/access.e2e.spec.ts`: **23 tests**. Covered:
     - link URL, passcode never returned, audit
     - capability checks
@@ -175,14 +175,14 @@ I used a **separate queue instead of `QUEUES.maintenance`**. BullMQ gives each j
     - export: JSON downloaded through the signed URL
     - delete: sessions, turns, memory and media file gone; participant tombstone; usage ledger kept; re-run is idempotent
     - account sessions: revoking another user's session → 404; a revoked token → 401
-  - Run with `cd apps/api && redis-cli -n 5 flushdb && npx jest src/modules/access src/modules/admin --forceExit` → **40/40 pass**.
+  - Run with `cd backend && redis-cli -n 5 flushdb && npx jest src/modules/access src/modules/admin --forceExit` → **40/40 pass**.
 - **curl against a real API** (port 4105, real B runtime):
   - created an org, a scenario from a template and published it;
   - created a link with passcode, domain rule and prefill;
   - wrong passcode → `invalid_passcode`; gmail address → `email_domain_not_allowed`;
   - a valid start returned `cfs_…`; B's `GET /api/runtime/sessions/:id` bootstrapped it; the session had `variables = {role_title: 'Account Executive' (prefill won), participant_name: 'Pat'}` and the unknown key was dropped;
   - enqueued `usage.checkAlerts` and `privacy.retention` on the queue and both completed.
-- **Playwright** (`apps/web/e2e/access-admin.spec.ts`, web on 3105 and API on 4105): **5/5 pass**.
+- **Playwright** (`frontend/e2e/access-admin.spec.ts`, web on 3105 and API on 4105): **5/5 pass**.
   - Landing: wrong domain, then wrong passcode, then success → `/live/<id>` with the token in sessionStorage; a revoked link shows its message.
   - Access page: create a one-time link with a prefill, a grant, and an embed token (show-once modal).
   - Invitation: signup from `/invite` → accept → the workspace, with the CREATOR role verified.

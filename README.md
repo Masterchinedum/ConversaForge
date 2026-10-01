@@ -12,16 +12,23 @@ AI voice-agent platform for structured conversations — interviews, coaching, s
 
 Prerequisites: Node 22+, pnpm 10 (`corepack enable`), PostgreSQL 16 and Redis/Valkey (or Docker).
 
+The backend and frontend are independent projects (each with its own `package.json`, lockfile, `.env`, Dockerfile and CI workflow). Run each from its own folder:
+
 ```bash
+# Backend — terminal 1
+cd backend
 docker compose up -d                          # Postgres :5432 + Valkey :6379 (or use local services)
 pnpm install
-cp .env.example apps/api/.env                 # set ENCRYPTION_KEY (openssl rand -hex 32) and SIGNING_SECRET
-cp apps/web/.env.local.example apps/web/.env.local 2>/dev/null || printf "API_INTERNAL_URL=http://localhost:4000\nNEXT_PUBLIC_API_WS_URL=ws://localhost:4000\n" > apps/web/.env.local
-pnpm --filter @cf/shared build
-pnpm --filter @cf/api prisma:migrate           # or during development: (cd apps/api && pnpm db:sync)
-pnpm --filter @cf/api seed                     # optional demo org, users, published templates, course, share link
-pnpm dev:api                                   # http://localhost:4000  (Swagger: /api/docs)
-pnpm dev:web                                   # http://localhost:3000
+cp .env.example .env                          # set ENCRYPTION_KEY (openssl rand -hex 32) and SIGNING_SECRET
+pnpm prisma:migrate                           # or during development: pnpm db:sync
+pnpm seed                                     # optional demo org, users, published templates, course, share link
+pnpm dev                                      # http://localhost:4000  (Swagger: /api/docs)
+
+# Frontend — terminal 2
+cd frontend
+pnpm install
+cp .env.example .env.local                    # points at the backend on :4000
+pnpm dev                                      # http://localhost:3000
 ```
 
 Demo users (after seeding; password `demo-password-123`): `owner@demo.test`, `admin@demo.test`, `creator@demo.test`, `reviewer@demo.test`, `learner@demo.test`.
@@ -35,28 +42,32 @@ No provider key is required to try the product: without one, conversations, anal
 
 **Voice modes.** New scenarios default to **live speech-to-speech** (Model → Voice mode "Live", provider "Auto" = Google Gemini Live `gemini-3.8-live`, with OpenAI `gpt-realtime-2.1` as the backup if Gemini has no key or fails during the call). The browser talks to the live model directly with a short-lived, single-use credential minted by the API — the real key never reaches the browser and the instructions/tools are locked into that credential. Browser speech is the last resort: when neither live model is available (or on phone calls and meeting notetakers) sessions automatically fall back to the **pipeline** (speech-to-text → language model → text-to-speech) and the call screen says so. Pipeline mode stays selectable per scenario when you want server-side control and auditability of every reply. Text models (Anthropic → OpenAI → Google fallback order, or the scenario's choice) are still used for post-session scoring/extraction, the drafting assistant and coach memory. Models: `OPENAI_REALTIME_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_TEXT_MODEL`, `GEMINI_ANALYSIS_MODEL`, `ANTHROPIC_LIVE_MODEL`, … (see `.env.example`).
 
-Keys can be set on the server (`apps/api/.env`) or per workspace in **Settings → AI providers** (encrypted at rest). To cap spend: set workspace quotas (Settings → Usage & quotas: session minutes / estimated cost per month with hard limits), keep `DEFAULT_MAX_SESSION_MINUTES` low, and use a cheaper model via `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5` / `ANTHROPIC_ANALYSIS_MODEL=claude-sonnet-5` / `GEMINI_ANALYSIS_MODEL=gemini-2.5-flash`. Every provider call is recorded in the usage ledger with an estimated cost.
+Keys can be set on the server (`backend/.env`) or per workspace in **Settings → AI providers** (encrypted at rest). To cap spend: set workspace quotas (Settings → Usage & quotas: session minutes / estimated cost per month with hard limits), keep `DEFAULT_MAX_SESSION_MINUTES` low, and use a cheaper model via `ANTHROPIC_LIVE_MODEL=claude-haiku-4-5` / `ANTHROPIC_ANALYSIS_MODEL=claude-sonnet-5` / `GEMINI_ANALYSIS_MODEL=gemini-2.5-flash`. Every provider call is recorded in the usage ledger with an estimated cost.
 
 ## Repository layout
 
 ```
-apps/api        NestJS 11 + Fastify API, WebSocket runtime, BullMQ worker, Prisma schema
-apps/web        Next.js 15 web app (creator/reviewer/admin UI, live call page, embed)
-packages/shared Scenario schema & validation, scoring math, variables, state machine, protocol
-infra           Dockerfiles, production compose, Caddy, backup/restore scripts
-docs            Architecture, API, embed, deployment, status, workstream notes
+backend/        NestJS 11 + Fastify API, WebSocket runtime, BullMQ worker, Prisma schema — standalone project
+frontend/       Next.js 15 web app (creator/reviewer/admin UI, live call page, embed) — standalone project
+infra/          Production compose + Caddy (runs the two published images together), backup/restore scripts
+docs/           Architecture, API, embed, deployment, status, workstream notes
 ```
+
+Neither project imports from the other. The API ↔ web contract (scenario schema & validation, scoring math, variables, state machine, WebSocket protocol, roles) lives in `src/shared/` and **each project keeps its own copy**. Change both copies together; `pnpm check-shared-drift` (in either folder, also run in CI) diffs them. To split into two repositories, move `backend/` or `frontend/` out as-is, together with its workflow from `.github/workflows/`.
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `pnpm build` | Build shared, API and web |
-| `pnpm test` | Unit/integration tests (shared: vitest, API: jest) |
-| `pnpm typecheck` | Type-check all packages |
-| `pnpm --filter @cf/web e2e` | Playwright browser journeys (needs API + web running) |
-| `cd apps/api && pnpm db:sync` | Dev schema sync (db push + raw SQL objects) |
-| `pnpm --filter @cf/api worker` | Run the job worker as a separate process |
+Run in `backend/` or `frontend/`:
+
+| Command | Where | What it does |
+|---|---|---|
+| `pnpm build` | both | Build the project |
+| `pnpm typecheck` | both | Type-check the project |
+| `pnpm test` | backend | Unit/integration tests (jest, including `src/shared`) |
+| `pnpm e2e` | frontend | Playwright browser journeys (needs API + web running) |
+| `pnpm db:sync` | backend | Dev schema sync (db push + raw SQL objects) |
+| `pnpm worker` | backend | Run the job worker as a separate process |
+| `pnpm check-shared-drift` | both | Diff this project's `src/shared` against the other's |
 
 ## License
 Proprietary. All third-party dependencies are under permissive licenses (MIT, Apache-2.0, BSD, ISC); see `docs/THIRD_PARTY.md`.

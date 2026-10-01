@@ -113,12 +113,12 @@ Tools render only when presented, and `tool.close` hides them. Participant-opena
   - B's upload allowlist has no images, so the sketch is kept in tool state rather than uploaded as a PNG.
 
 ## How it was tested (real API)
-Everything below ran against **workstream B's real runtime** (compiled to `apps/api/.dist-c`, API on :4103, web dev server on :3103), with the seeded demo workspace and the simulator LLM. Commands:
+Everything below ran against **workstream B's real runtime** (compiled to `backend/.dist-c`, API on :4103, web dev server on :3103), with the seeded demo workspace and the simulator LLM. Commands:
 
 ```
-cd apps/api && npx tsc -p tsconfig.build.json --outDir .dist-c
+cd backend && npx tsc -p tsconfig.build.json --outDir .dist-c
 PORT=4103 WEB_PUBLIC_URL=http://localhost:3103 API_PUBLIC_URL=http://localhost:4103 RUN_WORKERS_IN_API=true node .dist-c/main.js
-cd apps/web && NEXT_DIST_DIR=.next-c WEB_PORT=3103 API_INTERNAL_URL=http://localhost:4103 NEXT_PUBLIC_API_WS_URL=ws://localhost:4103 pnpm dev
+cd frontend && NEXT_DIST_DIR=.next-c WEB_PORT=3103 API_INTERNAL_URL=http://localhost:4103 NEXT_PUBLIC_API_WS_URL=ws://localhost:4103 pnpm dev
 E2E_WEB_URL=http://localhost:3103 E2E_API_URL=http://localhost:4103 \
 E2E_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/conversaforge \
   npx playwright test e2e/unit.spec.ts e2e/live.spec.ts e2e/tools.spec.ts e2e/embed.spec.ts e2e/voice.spec.ts e2e/server-voice.spec.ts e2e/realtime.spec.ts
@@ -184,5 +184,5 @@ E2E_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/conversaforge \
   - The client sends `start` only after its audio is ready, and relies on `turn.saved` ids equal to `agent.start` turnIds (as documented).
 - **D:** The end screen links to `/report/<sessionId>`. The participant token is available in `sessionStorage`/`localStorage['cf:session:<id>']`.
 - **E/F:** Create a session, store the token under `cf:session:<id>` (or pass `#t=<token>`), then navigate to `/live/<id>?return=<relative url>`.
-- The `apps/web/playwright.config.ts` added here is shared. It reads `E2E_WEB_URL`/`E2E_API_URL` and uses `/opt/pw-browsers/chromium` (override with `E2E_CHROMIUM`).
-- Next dev servers started with `NEXT_DIST_DIR=.next-<ws>` append `.next-<ws>/types/**/*.ts` to `apps/web/tsconfig.json`'s `include` (all workstreams' servers did this). The lead may want to reset that list.
+- The `frontend/playwright.config.ts` added here is shared. It reads `E2E_WEB_URL`/`E2E_API_URL` and uses `/opt/pw-browsers/chromium` (override with `E2E_CHROMIUM`).
+- Next dev servers started with `NEXT_DIST_DIR=.next-<ws>` append `.next-<ws>/types/**/*.ts` to `frontend/tsconfig.json`'s `include` (all workstreams' servers did this). The lead may want to reset that list.

@@ -16,7 +16,7 @@ let ctx: { workspaceId: string; scenarioId: string } | null = null;
 // Login is rate limited; reuse the session cookie across runs (node_modules/.cache is git-ignored).
 const AUTH_CACHE = join(__dirname, '..', 'node_modules', '.cache', 'cf-e2e', `.e2e-auth-${EMAIL.replace(/[^a-z0-9]/gi, '_')}.json`);
 
-/** Logged-in API client (seeded demo creator; see apps/api/prisma/seed.ts). */
+/** Logged-in API client (seeded demo creator; see backend/prisma/seed.ts). */
 export async function apiClient() {
   if (api) return api;
   if (existsSync(AUTH_CACHE)) {

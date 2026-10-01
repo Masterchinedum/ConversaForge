@@ -1,7 +1,7 @@
 {
-  // Use the workspace TypeScript (the version tsc, ts-jest and Next run with) instead of VS Code's bundled one,
-  // so editor diagnostics match `pnpm typecheck`. The root has no direct typescript dependency (pnpm keeps each
-  // package's copy, all the same version), so point at one package's copy.
-  "typescript.tsdk": "apps/api/node_modules/typescript/lib",
+  // Use the project TypeScript (the version tsc, ts-jest and Next run with) instead of VS Code's bundled one,
+  // so editor diagnostics match `pnpm typecheck`. backend/ and frontend/ pin the same version; when you open
+  // either folder on its own, its own .vscode/settings.json applies instead.
+  "typescript.tsdk": "backend/node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true
 }

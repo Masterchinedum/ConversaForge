@@ -1,8 +1,14 @@
-name: CI
+name: Backend
 on:
   push:
     branches: [main, "claude/**"]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
   pull_request:
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+
+defaults:
+  run:
+    working-directory: backend
 
 jobs:
   build-test:
@@ -27,25 +33,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with: { package_json_file: backend/package.json }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: backend/pnpm-lock.yaml }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @cf/shared build && pnpm --filter @cf/shared test
+      # src/shared is a copy of frontend/src/shared; flag drift (skips when the frontend isn't in this repo).
+      - run: pnpm check-shared-drift
       - name: Database schema
-        working-directory: apps/api
         run: |
           npx prisma migrate deploy
           npx prisma generate
-      - run: pnpm --filter @cf/api typecheck
-      - run: pnpm --filter @cf/api build
-      - run: pnpm --filter @cf/api test
-      - run: pnpm --filter @cf/web typecheck
-      - run: pnpm --filter @cf/web build
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
 
   docker:
     runs-on: ubuntu-latest
     needs: build-test
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f infra/docker/api.Dockerfile -t conversaforge-api:ci .
-      - run: docker build -f infra/docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_WS_URL=wss://example.com -t conversaforge-web:ci .
+      - run: docker build -t conversaforge-api:ci .

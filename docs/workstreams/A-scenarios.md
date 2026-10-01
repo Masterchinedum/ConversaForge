@@ -2,7 +2,7 @@
 
 Covers the scenario library, the editor backend and UI (guided, advanced, YAML/JSON), validation, publishing with immutable versions, rollback, duplicate/import/export, the drafting assistant, built-in templates, and the workspace and public galleries.
 
-## API (`apps/api/src/modules/scenarios`)
+## API (`backend/src/modules/scenarios`)
 
 All routes live under `/api/workspaces/:workspaceId/scenarios`. Reading drafts and editing require `scenarios.edit` (CREATOR or higher). Publishing and rollback require `scenarios.publish`. Listing a scenario in the gallery requires `scenarios.share`. Routes that API keys may call carry `@ApiScopes('scenarios:read' | 'scenarios:write')`.
 
@@ -90,7 +90,7 @@ Export writes YAML with a comment header, or plain JSON. Import also accepts an 
 - **Participant-facing vs private.** Field guides mark public description, participant instructions and first turn as participant-facing, and AI instructions, persona description and the rubric as private; `FIELD_AUDIENCE` in shared drives the badges in the form.
 - **Simulator (no key).** `ruleBasedDraft` now distinguishes a first brief (fills a complete, publishable draft) from follow-ups (targeted edits only): a new duration also moves the ending cap, wrap-up lead, timed instructions and duration mentions in AI-written prose (the creator's prose is reported, not rewritten); "add a question/ask about X" appends an agenda topic; "call it …" renames; fixed questions only on request (adaptive by default); supported tools are enabled on request; unsupported requests (slides, screen share, email, web search, calendar, video/body language, payments…) are reported; it writes a reply naming what changed and what was left alone, and asks open questions for thin briefs.
 
-## Templates (`packages/shared/src/templates.ts`)
+## Templates (`src/shared/templates.ts`)
 There are 8 original templates:
 - behavioral interview
 - system-design interview (whiteboard and timer tools)
@@ -128,8 +128,8 @@ There are 8 original templates:
 - `/gallery`, `/gallery/[scenarioId]`, `/gallery/templates/[key]` — public pages. "Start" links to `/p/[scenarioId]` (E). A template page lets a logged-in creator pick a workspace and create from it; logged-out visitors are sent to log in or sign up.
 
 ## Tests (actual results)
-- `pnpm --filter @cf/shared test`: 48 passed, including 34 template tests.
-- `cd apps/api && npx jest src/modules/scenarios`: 37 passed across 3 suites. The integration spec needs a Postgres DB named `conversaforge_test_a` (override with `TEST_DATABASE_URL`) and covers:
+- `(cd backend && pnpm test src/shared)`: 48 passed, including 34 template tests.
+- `cd backend && npx jest src/modules/scenarios`: 37 passed across 3 suites. The integration spec needs a Postgres DB named `conversaforge_test_a` (override with `TEST_DATABASE_URL`) and covers:
   - draft revision conflicts, permissive storage, unsafe paths, prose kept verbatim;
   - publish blocks missing fields, bad weights, unknown placeholders, another workspace's knowledge documents and functions, and planned tools;
   - versions are immutable (the DB trigger rejects UPDATE), an identical republish gets 409, diffs work, rollback creates v3 with the right hash and resets the draft;
@@ -143,13 +143,13 @@ There are 8 original templates:
 - Manual `curl` checks against an API on :4101:
   - the full journey (template → publish v1 → 409 on identical republish → revision conflict → v2 → diff → rollback v3 → YAML export → preview with compiled prompt → import round trip → `!!js/function` rejected → assistant propose/apply (simulated) → list in gallery → public gallery and detail with only public fields → workspace gallery);
   - permissions: a user from another workspace gets 404, a MEMBER gets 403 on scenario routes and 200 on the workspace gallery, and a cross-origin cookie POST gets 403.
-- Playwright `apps/web/e2e/scenarios.spec.ts` passed in 23 s against web :3101 and API :4101. The journey is: create blank → lock the name → simulated assistant proposal without the name → apply → edit with autosave → break the rubric weights, see the error, normalize → Validate → publish v1 → edit → v2 → diff → rollback to v1 (creates v3) → preview (participant view and prompt) → YAML with an invalid value shown inline, then a valid one applied → library badges → workspace gallery "Use template" → public gallery. Command: `WEB_URL=http://localhost:3101 CHROMIUM_PATH=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell npx playwright test e2e/scenarios.spec.ts` (the installed Chromium is build 1194, Playwright expects 1193, so `CHROMIUM_PATH` overrides it).
+- Playwright `frontend/e2e/scenarios.spec.ts` passed in 23 s against web :3101 and API :4101. The journey is: create blank → lock the name → simulated assistant proposal without the name → apply → edit with autosave → break the rubric weights, see the error, normalize → Validate → publish v1 → edit → v2 → diff → rollback to v1 (creates v3) → preview (participant view and prompt) → YAML with an invalid value shown inline, then a valid one applied → library badges → workspace gallery "Use template" → public gallery. Command: `WEB_URL=http://localhost:3101 CHROMIUM_PATH=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell npx playwright test e2e/scenarios.spec.ts` (the installed Chromium is build 1194, Playwright expects 1193, so `CHROMIUM_PATH` overrides it).
 
-- Scenario Studio (2026-09-30): `cd apps/api && npx jest src/modules/scenarios` → 58 passed (studio create; brief → edits + lock → follow-up → v1 → session → v2; locks under "regenerate everything"; unsupported capabilities and planned-tool stripping; creator-written detection; drafter follow-up rules; agent runs: standard / flash / deep, locks, busy + stop, orphaned stop, undo, workspace scoping). Playwright `e2e/scenario-studio.spec.ts` (desktop 1440×900 and phone 390×844) and the updated `e2e/scenarios.spec.ts` pass against web :3101 / API :4101 with the simulator: `E2E_WEB_URL=http://localhost:3101 E2E_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/scenario-studio.spec.ts` (`scenarios.spec.ts` also needs `WEB_URL` and `CHROMIUM_PATH`). Screenshots land in `apps/web/node_modules/.cache/cf-e2e/studio-journey/`.
+- Scenario Studio (2026-09-30): `cd backend && npx jest src/modules/scenarios` → 58 passed (studio create; brief → edits + lock → follow-up → v1 → session → v2; locks under "regenerate everything"; unsupported capabilities and planned-tool stripping; creator-written detection; drafter follow-up rules; agent runs: standard / flash / deep, locks, busy + stop, orphaned stop, undo, workspace scoping). Playwright `e2e/scenario-studio.spec.ts` (desktop 1440×900 and phone 390×844) and the updated `e2e/scenarios.spec.ts` pass against web :3101 / API :4101 with the simulator: `E2E_WEB_URL=http://localhost:3101 E2E_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/scenario-studio.spec.ts` (`scenarios.spec.ts` also needs `WEB_URL` and `CHROMIUM_PATH`). Screenshots land in `frontend/node_modules/.cache/cf-e2e/studio-journey/`.
 
 ## Not done / notes for the lead
 - **Studio with a real model is only partly exercised.** Two real `claude-opus-5` proposals were produced on the dev DB (they finished after the old 30 s proxy timeout, now 180 s via `experimental.proxyTimeout`), but the multi-pass agent (expand / rubric / review / fix prompts) has only run through the simulator. Quality and run time of free-form edits depend on the configured assistant model; each standard run makes 3–5 model calls (flash 1, deep up to 6).
 - **Real AI provider untested.** The drafting assistant's real-provider path (Anthropic/OpenAI `completeJson` with the JSON schema) is implemented but not tested here, because no keys are available. Only the simulator path was exercised.
 - **Prompt preview depends on B.** It imports B's `compileStablePrompt` and `compileDynamicPrompt` from `modules/runtime/engine/prompt-compiler.ts` (and `initialRuntimeState`) and passes `hasUpdateProgressTool: true`. If B changes those signatures, the only file to update is `scenario-preview.ts`. If the compiler throws, the preview returns `prompt: null` with a note.
 - **Custom functions list is admin-only.** G's `GET /workspaces/:ws/functions` requires `providers.manage` (ADMIN), so creators see "ask an admin" in the functions picker; ids already on the scenario are kept and still validated server-side. Relaxing it to CREATOR read access would be G's change to make.
-- **Shared `tsconfig.json` edited by dev servers.** `next dev` rewrote `apps/web/tsconfig.json` to add `.next-a/types/**` (other workstreams' dev servers added theirs too). The lead may want to reset that file before committing.
+- **Shared `tsconfig.json` edited by dev servers.** `next dev` rewrote `frontend/tsconfig.json` to add `.next-a/types/**` (other workstreams' dev servers added theirs too). The lead may want to reset that file before committing.

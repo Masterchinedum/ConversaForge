@@ -1,6 +1,6 @@
 # Workstream B — Live session runtime
 
-Module: `apps/api/src/modules/runtime` (exports `SessionsService`, `RuntimeService`, `SpeechService`).
+Module: `backend/src/modules/runtime` (exports `SessionsService`, `RuntimeService`, `SpeechService`).
 A participant can hold a complete voice conversation with an agent that follows the scenario version's
 goals/agenda, forms follow-ups from what they actually said, handles barge-in, pauses, reconnects and
 timers, and ends gracefully. Everything works end to end with the clearly-labeled local **simulator**;
@@ -27,7 +27,7 @@ Shared/foundation edits (additive only):
 - `common/llm/llm.types.ts`: `ChatRequest.systemDynamic?`, `LlmMessage.raw?` (provider-native assistant content), `done.raw?`.
 - `common/llm/anthropic.provider.ts`: second system text block (no `cache_control`) for `systemDynamic`; assistant `raw` replayed verbatim (keeps signed `thinking` blocks for in-turn tool continuation); `done.raw` returned.
 - `common/llm/openai.provider.ts`: `systemDynamic` sent as a second system message.
-- `packages/shared/src/protocol.ts`: optional `TurnDTO.simulated/kind`, `SessionSnapshot.phase/progress/voiceMode/fallbacks`, new server message `realtime.instruction`, protocol notes (see below).
+- `src/shared/protocol.ts`: optional `TurnDTO.simulated/kind`, `SessionSnapshot.phase/progress/voiceMode/fallbacks`, new server message `realtime.instruction`, protocol notes (see below).
 
 ## Contracts for other workstreams
 
@@ -84,7 +84,7 @@ Engines live in memory: run one API instance or route `/ws/session` and media st
 The runtime module registers Fastify buffer parsers for `application/octet-stream`, `audio/*` (webm/ogg/mp4/mpeg/wav) and `video/webm|mp4` (10 MB), only if not already registered.
 
 ## WebSocket `/ws/session`
-Protocol: `packages/shared/src/protocol.ts`. Behavior:
+Protocol: `src/shared/protocol.ts`. Behavior:
 - First message `hello` within 10 s (60 hellos/min/IP); bad token → `error` + close 4001; protocol mismatch → 4004. `welcome` carries snapshot (+`phase`, `progress`, `voiceMode`, `fallbacks`), config, transcript (all turns, or only `seq > lastSeq` when `lastSeq` is sent), open tools, `resumed`.
 - One active connection per session: a newer `hello` sends `error{code:'superseded'}` to the old socket and closes it with 4003.
 - `start`: CREATED needs consent (`error consent_required`) unless the scenario records nothing and has analysis off; READY → CONNECTING → ACTIVE, `session.started`, then the scripted first turn (variables substituted) when the agent speaks first. Idempotent.

@@ -15,18 +15,18 @@ provider too**, so a customer with only a Google key gets a fully working produc
 
 | Area | Files |
 |---|---|
-| Shared config (additive) | `packages/shared/src/scenario-config.ts`: `model.voiceMode` default **`realtime`**; `model.realtimeProvider` ∈ `auto \| google \| openai` (default **`auto`**); `model.llmProvider` gains `google`; publish warnings for a live-model override that doesn't match the chosen provider and for live voice + phone/meeting channels. `protocol.ts`: `ClientRuntimeConfig.realtime.provider` is `openai \| google`, new optional `requestedVoiceMode`. Existing versions that say `openai`/`pipeline` are unchanged. |
-| Env | `GEMINI_API_KEY` (alias `GOOGLE_API_KEY`), `GEMINI_LIVE_MODEL` (default `gemini-3.8-live`; `OPENAI_REALTIME_MODEL` backup default `gpt-realtime-2.1`), `GEMINI_TEXT_MODEL` (`gemini-2.5-flash`), `GEMINI_ANALYSIS_MODEL` (`gemini-2.5-pro`), `GEMINI_BASE_URL` (proxies/tests) — `apps/api/src/config/env.ts`, `/.env.example` |
-| Google text LLM | `apps/api/src/common/llm/google.provider.ts` (`GoogleProvider`: `streamChat`, `completeJson`), wired in `llm.service.ts` (`resolve`, `defaultModel`, `availability().google`, `providerSecret(ws,'google', capability?)`) |
+| Shared config (additive) | `src/shared/scenario-config.ts`: `model.voiceMode` default **`realtime`**; `model.realtimeProvider` ∈ `auto \| google \| openai` (default **`auto`**); `model.llmProvider` gains `google`; publish warnings for a live-model override that doesn't match the chosen provider and for live voice + phone/meeting channels. `protocol.ts`: `ClientRuntimeConfig.realtime.provider` is `openai \| google`, new optional `requestedVoiceMode`. Existing versions that say `openai`/`pipeline` are unchanged. |
+| Env | `GEMINI_API_KEY` (alias `GOOGLE_API_KEY`), `GEMINI_LIVE_MODEL` (default `gemini-3.8-live`; `OPENAI_REALTIME_MODEL` backup default `gpt-realtime-2.1`), `GEMINI_TEXT_MODEL` (`gemini-2.5-flash`), `GEMINI_ANALYSIS_MODEL` (`gemini-2.5-pro`), `GEMINI_BASE_URL` (proxies/tests) — `backend/src/config/env.ts`, `/.env.example` |
+| Google text LLM | `backend/src/common/llm/google.provider.ts` (`GoogleProvider`: `streamChat`, `completeJson`), wired in `llm.service.ts` (`resolve`, `defaultModel`, `availability().google`, `providerSecret(ws,'google', capability?)`) |
 | Provider connections | `modules/providers/provider-catalog.ts` (`google`: LLM + REALTIME), `provider-verify.ts` (models.list), `providers.service.ts` (status rows: live voice lists OpenAI/Google, settings keep `liveModel/analysisModel/realtimeModel/voice`); web `settings/providers/page.tsx` |
 | Resolver | `modules/runtime/voice/provider-resolver.service.ts` (`pickLiveProvider`, `liveModel`, fallback reasons) |
 | Token minting | `modules/runtime/voice/realtime.service.ts` (`mintGoogle`, `geminiLiveConfig`, `GEMINI_VOICES`, `GEMINI_TOKEN`), `participant.controller.ts` (`POST …/realtime-token { resumeHandle?, reconnect? }`), `engine/session-engine.ts` (`realtimeSetup({ withHistory })`, REALTIME_SECONDS + agent-turn metadata carry the provider) |
 | Pricing | `modules/usage/pricing.ts`: Gemini text models + `google:realtime` per-minute — **estimates** |
-| Client adapter | `apps/web/src/lib/voice/gemini-live.ts` (`GeminiLiveAdapter`), `runtime-api.ts` (`fetchGeminiToken`), `index.ts` (plan + selection + `voiceLabel`), `openai-realtime.ts` (label, typed text → model) |
+| Client adapter | `frontend/src/lib/voice/gemini-live.ts` (`GeminiLiveAdapter`), `runtime-api.ts` (`fetchGeminiToken`), `index.ts` (plan + selection + `voiceLabel`), `openai-realtime.ts` (label, typed text → model) |
 | Live UI | `CallScreen.tsx` ("Voice: Google Gemini Live", **"Live voice unavailable — using …"** chip), `DeviceCheck.tsx` (planned mode + fallback note), `use-live-call.ts` (`voiceLabel`, `liveFallback`, typed input forwarded to live models) |
 | Scenario editor | `components/scenarios/sections.tsx` → Model & providers: voice mode (Live vs Pipeline, trade-off help), live provider (Auto / OpenAI Realtime / Google Gemini Live), live model override, LLM list with Google |
-| CSP | `apps/web/next.config.mjs`: `connect-src wss://generativelanguage.googleapis.com` |
-| Dependency | `@google/genai@2.24.0` (Apache-2.0) in `apps/api` and `apps/web` (pinned: the README warns of breaking changes in 3.x). The browser loads it lazily (separate chunk) only for Gemini sessions. |
+| CSP | `frontend/next.config.mjs`: `connect-src wss://generativelanguage.googleapis.com` |
+| Dependency | `@google/genai@2.24.0` (Apache-2.0) in `backend` and `frontend` (pinned: the README warns of breaking changes in 3.x). The browser loads it lazily (separate chunk) only for Gemini sessions. |
 
 ### Provider resolution (`providerInfo`)
 - `voiceMode:'realtime'` requested:
@@ -135,7 +135,7 @@ greeting three times and every transcript line showed twice. Causes and fixes:
 | Transcript rendered twice; last caption never cleared | The server saves live-model turns with `clientTurnId = rt_<itemId>`; the client store compared raw item ids, so streaming rows/captions were never replaced by the saved turn | `turnMatchesItem()` in `store.ts`; captions clear when the utterance commits; a participant utterance shows once while it is transcribed |
 | New agent turn cut the previous one's last words | The player treated a second turn as superseding the first | Turns queue back to back; only barge-in/stop interrupts |
 
-Verified against the real model: `apps/web/e2e/gemini-real.spec.ts` (opt-in, `E2E_REAL_GEMINI=1`,
+Verified against the real model: `frontend/e2e/gemini-real.spec.ts` (opt-in, `E2E_REAL_GEMINI=1`,
 `E2E_SCENARIO_NAME="Active listening coaching"`; `E2E_ECHO=0.5` feeds everything the page plays back into
 the synthetic mic after 60 ms at half volume — worst-case speaker echo without echo cancellation). Result
 2026-09-27 (headless Chrome, `gemini-3.8-live`): with echo, the greeting played as one continuous 4.8 s run,
@@ -144,8 +144,8 @@ interrupted, one transcript row; without echo the same (5.6 s run). Before the c
 greeting came out in 4 fragments with 3 underruns, and Gemini's silent-mic "`<no speech>{pause}`" turns
 showed as agent rows.
 
-Tests: `apps/web/e2e/unit.spec.ts` (resampler continuity and ratio, VAD `aboveMs`, echo warm-up,
-transcript cleaning, store dedupe with `rt_` ids), `apps/web/e2e/gemini-live.spec.ts` (same protocol expectations against the new
+Tests: `frontend/e2e/unit.spec.ts` (resampler continuity and ratio, VAD `aboveMs`, echo warm-up,
+transcript cleaning, store dedupe with `rt_` ids), `frontend/e2e/gemini-live.spec.ts` (same protocol expectations against the new
 adapter; the session-socket proxy now also drops the real session's own `realtime.instruction` /
 `realtime.tool_result` messages, since seeded scenarios run live voice by default, and token requests
 carry `provider`), `realtime.spec.ts`, `live-providers.spec.ts` (VAD settings in the token). On a machine
@@ -224,9 +224,9 @@ plus `raw.githubusercontent.com/googleapis/js-genai/main/…` and `…/python-ge
 | Auth header `x-goog-api-key`; `models.list` at `v1beta/models`; invalid key → HTTP 400 `API_KEY_INVALID` | SDK (`GOOGLE_API_KEY_HEADER`); the 400 shape is Google's documented error format (not observable here — mocked) |
 
 ## How it was tested (actual results)
-- **Shared** (`pnpm --filter @cf/shared test`): 71/71 (new `live-models.test.ts`: defaults, backward-compatible
+- **Shared** (`(cd backend && pnpm test src/shared)`): 71/71 (new `live-models.test.ts`: defaults, backward-compatible
   parsing, warnings, all templates still publish).
-- **API jest** (`cd apps/api && PGPASSWORD=postgres pnpm test:prepare && npx jest --forceExit`): **373/373, 28 suites**. New:
+- **API jest** (`cd backend && PGPASSWORD=postgres pnpm test:prepare && npx jest --forceExit`): **373/373, 28 suites**. New:
   - `common/llm/google.provider.spec.ts` — real SDK against a local mock of the Gemini REST API: stream URL/key
     header, both system parts, JSON-schema function declarations, text vs thought parts, synthesized call ids,
     verbatim model-turn replay with `thoughtSignature`, `functionResponse` mapping (output/error), usage and
